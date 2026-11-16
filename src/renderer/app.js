@@ -129,6 +129,9 @@ function sessionsForPRs(prs) {
 
 // "To address" (comments waiting on you) only makes sense on PRs you authored.
 const isMine = (p) => Boolean(state.prs && p.author === state.prs.viewer);
+// Counter badge for filter tabs; always shown, muted at zero.
+const countBadge = (n, tone) => h('span', { class: `tab-badge ${n ? tone : 'zero'}` }, n);
+
 const isPRView = (v = state.view) => v === 'prs' || v === 'reviews';
 // The view a PR lives in: your own PRs vs. review requests.
 const viewForPR = (url) => (state.prs && state.prs.review.some((p) => p.url === url) && !state.prs.mine.some((p) => p.url === url) ? 'reviews' : 'prs');
@@ -296,7 +299,7 @@ function renderListHead() {
     nf.replaceChildren(
       ...[
         ['all', 'All'],
-        ['unread', `Unread${unread ? ` ${unread}` : ''}`],
+        ['unread', ['Unread', countBadge(unread, 'accent')]],
       ].map(([v, label]) =>
         h(
           'button',
@@ -322,8 +325,8 @@ function renderListHead() {
     const respond = mine.filter((p) => p.needsResponse).length;
     const opts = [
       ['all', 'All'],
-      ['ready', `Ready to merge${readyUnits ? ` ${readyUnits}` : ''}`],
-      ['respond', `To address${respond ? ` ${respond}` : ''}`],
+      ['ready', ['Ready to merge', countBadge(readyUnits, 'green')]],
+      ['respond', ['To address', countBadge(respond, 'red')]],
     ];
     pf.replaceChildren(
       ...opts.map(([v, label]) =>

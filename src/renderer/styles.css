@@ -218,3 +218,11 @@ details.ctx summary:hover { color: var(--muted); }
 .stack-toggle { display: block; width: 100%; background: none; border: none; border-top: 1px solid var(--line); color: var(--muted); padding: 7px; font-size: 12px; cursor: pointer; border-radius: 0 0 10px 10px; }
 .stack-toggle:hover { color: var(--accent-2); background: var(--panel-2); }
 .stack-toggle.inline { display: inline-block; width: auto; border: none; padding: 2px 6px; margin-left: 4px; border-radius: 5px; }
+
+/* filter tab counters */
+.seg.filters button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
+.tab-badge { min-width: 18px; height: 18px; padding: 0 6px; border-radius: 99px; font-size: 11px; font-weight: 700; line-height: 18px; text-align: center; font-variant-numeric: tabular-nums; }
+.tab-badge.green { background: var(--green); color: #0b1a10; }
+.tab-badge.red { background: var(--red); color: #2a0b0b; }
+.tab-badge.accent { background: var(--accent); color: #1a0f0a; }
+.tab-badge.zero { background: var(--panel-2); color: var(--faint); border: 1px solid var(--line); line-height: 16px; }
