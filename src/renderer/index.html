@@ -22,6 +22,7 @@
           <div class="nav-sep"></div>
           <a data-view="sessions">Claude sessions <span class="count" data-count="live"></span></a>
           <a data-view="prs">Pull requests <span class="count" data-count="prs"></span></a>
+          <a data-view="reviews">Review requests <span class="count" data-count="reviews"></span></a>
         </nav>
         <div class="sidebar-foot">
           <label class="field-label" for="terminalSel">Resume in</label>
@@ -40,6 +41,7 @@
           <div class="row" style="justify-content:space-between">
             <h1 id="listTitle">Open</h1>
             <span class="row">
+              <button id="expandBtn" class="btn small" hidden>Expand all</button>
               <button id="stackBtn" class="btn small" hidden title="Group stacked PRs (a PR based on another PR's branch)">Stacks</button>
               <button id="refreshBtn" class="btn small" hidden>Refresh</button>
               <button id="markAllBtn" class="btn small" hidden>Mark all read</button>

@@ -109,7 +109,7 @@ function stackHealth(stack) {
   const changes = stack.filter((p) => p.reviewDecision === 'CHANGES_REQUESTED').length;
   const threads = stack.reduce((a, p) => a + (p.unresolvedThreads || 0), 0);
   const conflicts = stack.filter((p) => p.mergeable === 'CONFLICTING').length;
-  const awaiting = stack.reduce((a, p) => a + (p.awaitingReply || 0), 0);
+  const awaiting = stack.reduce((a, p) => a + (isMine(p) ? p.awaitingReply || 0 : 0), 0);
   if (stack.every((p) => p.mergeReady)) return [h('span', { class: 'pill ready' }, '✓ whole stack ready to merge')];
   return [
     awaiting ? h('span', { class: 'pill bad' }, `💬 ${awaiting} to address`) : null,
@@ -125,6 +125,36 @@ function sessionsForPRs(prs) {
   const out = [];
   for (const p of prs) for (const s of sessionsForPR(p)) if (!out.includes(s)) out.push(s);
   return out;
+}
+
+// "To address" (comments waiting on you) only makes sense on PRs you authored.
+const isMine = (p) => Boolean(state.prs && p.author === state.prs.viewer);
+const isPRView = (v = state.view) => v === 'prs' || v === 'reviews';
+// The view a PR lives in: your own PRs vs. review requests.
+const viewForPR = (url) => (state.prs && state.prs.review.some((p) => p.url === url) && !state.prs.mine.some((p) => p.url === url) ? 'reviews' : 'prs');
+// Filters (Ready / To address) only apply to your own PRs.
+const activePRFilter = () => (state.view === 'prs' ? state.prFilter : 'all');
+
+// Your explicit expand/collapse choice always wins; otherwise small stacks, stacks holding the
+// selected PR, and stacks under a filter start open.
+function stackIsOpen(root, size, containsSelected) {
+  const choice = state.stackOpen[root];
+  if (choice !== undefined) return choice;
+  return containsSelected || activePRFilter() !== 'all' || size <= 5;
+}
+
+function stackRoots() {
+  const roots = new Map();
+  const list = state.prs ? (state.view === 'reviews' ? state.prs.review : state.prs.mine) : [];
+  for (const p of list) if (p.stackSize > 1 && p.stackRoot) roots.set(p.stackRoot, p.stackSize);
+  return roots;
+}
+
+function setAllStacks(open) {
+  for (const root of stackRoots().keys()) state.stackOpen[root] = open;
+  localStorage.setItem('stackOpen', JSON.stringify(state.stackOpen));
+  renderListHead();
+  renderList();
 }
 
 // ---- pills ----------------------------------------------------------------
@@ -145,7 +175,7 @@ function prStatusPills(p, { compact } = {}) {
   else if (p.reviewDecision === 'REVIEW_REQUIRED' && !compact) out.push(h('span', { class: 'pill' }, 'review required'));
   if (p.mergeReady) out.unshift(h('span', { class: 'pill ready' }, '✓ ready to merge'));
   else if (p.ready && p.stackSize > 1) out.unshift(h('span', { class: 'pill', title: 'This PR is ready, but other PRs in its stack are not' }, 'ready · waiting on stack'));
-  if (p.awaitingReply) out.push(h('span', { class: 'pill bad', title: 'Unresolved threads where someone else spoke last' }, `💬 ${p.awaitingReply} to address`));
+  if (p.awaitingReply && isMine(p)) out.push(h('span', { class: 'pill bad', title: 'Unresolved threads where someone else spoke last' }, `💬 ${p.awaitingReply} to address`));
   else if (p.unresolvedThreads) out.push(h('span', { class: 'pill wait' }, `💬 ${p.unresolvedThreads}`));
   if (p.mergeable === 'CONFLICTING') out.push(h('span', { class: 'pill bad' }, 'conflicts'));
   return out;
@@ -200,7 +230,7 @@ function linkPRs(task, urls) {
 }
 
 // ---- rendering ------------------------------------------------------------
-const VIEW_TITLES = { notifications: 'Notifications', open: 'Open', todo: 'To do', doing: 'In progress', done: 'Done', sessions: 'Claude sessions', prs: 'Pull requests' };
+const VIEW_TITLES = { reviews: 'Review requests', notifications: 'Notifications', open: 'Open', todo: 'To do', doing: 'In progress', done: 'Done', sessions: 'Claude sessions', prs: 'Pull requests' };
 const STATUS_ORDER = { doing: 0, todo: 1, done: 2 };
 const PRIO_ORDER = { high: 0, normal: 1, low: 2 };
 
@@ -231,6 +261,7 @@ function render({ keepDetail } = {}) {
   }
   c.live = state.sessions.filter((s) => s.live).length || '';
   c.prs = state.prs ? state.prs.mine.length : '';
+  c.reviews = state.prs ? state.prs.review.length : '';
   c.unread = state.notifications.filter((n) => !n.read).length || '';
   document.querySelectorAll('[data-count]').forEach((el) => (el.textContent = c[el.dataset.count] || ''));
   document.querySelectorAll('#nav a').forEach((a) => a.classList.toggle('active', a.dataset.view === state.view));
@@ -243,9 +274,15 @@ function renderListHead() {
   $('#listTitle').textContent = VIEW_TITLES[state.view];
   const btn = $('#refreshBtn');
   const sub = $('#listSub');
-  btn.hidden = state.view !== 'prs';
+  btn.hidden = !isPRView();
+  const eb = $('#expandBtn');
+  const roots = stackRoots();
+  const anyCollapsed = [...roots].some(([root, size]) => !stackIsOpen(root, size, false));
+  eb.hidden = !isPRView() || !state.groupStacks || !roots.size;
+  eb.textContent = anyCollapsed ? '▾ Expand all' : '▸ Collapse all';
+  eb.onclick = () => setAllStacks(anyCollapsed);
   const sb = $('#stackBtn');
-  sb.hidden = state.view !== 'prs';
+  sb.hidden = !isPRView();
   sb.classList.toggle('on', state.groupStacks);
   sb.textContent = state.groupStacks ? '☑ Stacks' : '☐ Stacks';
   const mb = $('#markAllBtn');
@@ -310,7 +347,7 @@ function renderListHead() {
   btn.textContent = state.prLoading ? 'Refreshing…' : 'Refresh';
   sub.className = 'list-sub';
   sub.textContent = '';
-  if (state.view === 'prs') {
+  if (isPRView()) {
     if (state.prError) {
       sub.className = 'list-sub error';
       sub.textContent = state.prError;
@@ -416,7 +453,7 @@ function renderList() {
     return;
   }
 
-  if (state.view === 'prs') {
+  if (isPRView()) {
     if (!state.prs) {
       list.append(h('div', { class: 'empty' }, state.prLoading ? 'Loading pull requests from GitHub…' : state.prError || 'No PR data yet.'));
       return;
@@ -443,7 +480,7 @@ function renderList() {
     };
     const section = (label, prs) => {
       const searched = prs.filter((p) => matches([p.title, p.repo, p.number, p.branch, p.author].join(' ')));
-      const f = state.prFilter;
+      const f = activePRFilter();
       const keep = (p) => f === 'all' || (f === 'ready' ? p.mergeReady : p.needsResponse);
       // Readiness is stack-aware (mergeReady), so a ready stack shows whole; "needs response" shows
       // only the matching PRs, still under their stack header for context.
@@ -465,7 +502,13 @@ function renderList() {
               .filter((p, i, arr) => p.stackRoot === stack[0].stackRoot && arr.findIndex((x) => x.url === p.url) === i)
               .sort((a, b) => a.stackIndex - b.stackIndex)
           : stack;
-        const open = containsSelected || state.prFilter !== 'all' || (state.stackOpen[full[0].url] ?? full.length <= 5);
+        const open = stackIsOpen(full[0].url, full.length, containsSelected);
+        const toggle = () => {
+          state.stackOpen[full[0].url] = !open;
+          localStorage.setItem('stackOpen', JSON.stringify(state.stackOpen));
+          renderListHead();
+          renderList();
+        };
         list.append(
           h(
             'div',
@@ -474,11 +517,8 @@ function renderList() {
               'div',
               {
                 class: 'stack-head',
-                onclick: () => {
-                  state.stackOpen[full[0].url] = !open;
-                  localStorage.setItem('stackOpen', JSON.stringify(state.stackOpen));
-                  renderList();
-                },
+                title: open ? 'Collapse stack' : 'Expand stack',
+                onclick: toggle,
               },
               h('span', { class: 'stack-caret' }, open ? '▾' : '▸'),
               h(
@@ -499,14 +539,38 @@ function renderList() {
                 '+ Task',
               ),
             ),
-            open ? stack.map((p) => prItem(p, { pos: `${(p.stackIndex ?? 0) + 1}/${p.stackSize || stack.length}` })) : null,
+            open
+              ? [
+                  stack.map((p) => prItem(p, { pos: `${(p.stackIndex ?? 0) + 1}/${p.stackSize || stack.length}` })),
+                  stack.length > 5 ? h('button', { class: 'stack-toggle', onclick: toggle }, '▴ Collapse stack') : null,
+                ]
+              : h(
+                  'div',
+                  { class: 'stack-mini' },
+                  // Collapsed: one chip per PR, coloured by status; click to jump to it.
+                  stack.map((p) =>
+                    h(
+                      'button',
+                      {
+                        class: `mini ${p.mergeReady ? 'ok' : (isMine(p) && p.needsResponse) || p.checks === 'FAILURE' || p.mergeable === 'CONFLICTING' ? 'bad' : p.ready ? 'ok-ish' : ''} ${state.selected === p.url ? 'sel' : ''}`,
+                        title: `#${p.number} ${p.title}`,
+                        onclick: () => {
+                          state.stackOpen[full[0].url] = true;
+                          localStorage.setItem('stackOpen', JSON.stringify(state.stackOpen));
+                          select(p.url);
+                        },
+                      },
+                      `${(p.stackIndex ?? 0) + 1}`,
+                    ),
+                  ),
+                  h('button', { class: 'stack-toggle inline', onclick: toggle }, `▾ Show ${stack.length} PRs`),
+                ),
           ),
         );
       }
     };
-    section('Your PRs', state.prs.mine);
-    // "To address" is about comments on your own PRs; review requests don't apply.
-    if (state.prFilter !== 'respond') section('Review requested', state.prs.review);
+    if (state.view === 'reviews') section('Waiting on your review', state.prs.review);
+    else section('Your PRs', state.prs.mine);
     return;
   }
 
@@ -584,7 +648,7 @@ function renderDetail() {
     const n = state.notifications.find((x) => x.id === state.selected);
     return pane.append(n ? notificationDetail(n) : emptyDetail('Select a notification.'));
   }
-  if (state.view === 'prs') {
+  if (isPRView()) {
     const p = prByUrl(state.selected);
     return pane.append(p ? prDetail(p) : emptyDetail('Pick a pull request to see its Claude sessions and tasks.'));
   }
@@ -890,7 +954,7 @@ async function openNotification(n) {
 }
 
 function showPRInBaton(url) {
-  state.view = 'prs';
+  state.view = viewForPR(url);
   state.prFilter = 'all';
   state.search = '';
   $('#search').value = '';
@@ -1291,7 +1355,7 @@ document.querySelectorAll('#nav a').forEach((a) =>
       await loadSessions();
       render();
     }
-    if (state.view === 'prs' && (!state.prs || Date.now() - new Date(state.prs.fetchedAt) > 2 * 60 * 1000)) refreshPRs();
+    if (isPRView() && (!state.prs || Date.now() - new Date(state.prs.fetchedAt) > 2 * 60 * 1000)) refreshPRs();
   }),
 );
 $('#refreshBtn').addEventListener('click', () => refreshPRs());
@@ -1317,11 +1381,11 @@ document.addEventListener('keydown', (e) => {
     e.preventDefault();
     $('#search').focus();
   }
-  if (e.metaKey && e.key === 'o' && state.view === 'prs' && prByUrl(state.selected)) {
+  if (e.metaKey && e.key === 'o' && isPRView() && prByUrl(state.selected)) {
     e.preventDefault();
     api.openUrl(state.selected);
   }
-  if (e.metaKey && e.key === 'r' && state.view === 'prs') {
+  if (e.metaKey && e.key === 'r' && isPRView()) {
     e.preventDefault();
     refreshPRs();
   }
@@ -1361,7 +1425,7 @@ api.on('notifications:focus', async (id) => {
 });
 $('#markAllBtn').addEventListener('click', () => api.setNotificationsRead({ ids: 'all', read: true }));
 api.on('prs:focus', (url) => {
-  state.view = 'prs';
+  state.view = viewForPR(url);
   state.search = '';
   $('#search').value = '';
   state.prFilter = 'all';

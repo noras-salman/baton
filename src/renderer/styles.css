@@ -204,3 +204,17 @@ details.ctx summary:hover { color: var(--muted); }
 .comment-head { display: flex; align-items: center; gap: 4px; }
 .comment-head .open-btn { opacity: 1; }
 .comment-body { color: #c9cdd8; margin-top: 4px; line-height: 1.5; white-space: pre-wrap; }
+
+/* stack expand/collapse */
+.stack-caret { font-size: 14px; color: var(--muted); width: 14px; }
+.stack-head:hover .stack-caret { color: var(--accent-2); }
+.stack-mini { display: flex; flex-wrap: wrap; gap: 4px; padding: 0 10px 10px 32px; align-items: center; }
+.stack-mini .mini { min-width: 24px; height: 20px; padding: 0 5px; border-radius: 5px; border: 1px solid var(--line); background: var(--panel-2); color: var(--muted); font: 10.5px ui-monospace, monospace; cursor: pointer; }
+.stack-mini .mini.ok { background: rgba(79, 191, 127, 0.22); border-color: rgba(79, 191, 127, 0.5); color: var(--green); }
+.stack-mini .mini.ok-ish { border-color: rgba(79, 191, 127, 0.45); color: var(--green); }
+.stack-mini .mini.bad { background: rgba(239, 107, 107, 0.15); border-color: rgba(239, 107, 107, 0.45); color: var(--red); }
+.stack-mini .mini.sel { outline: 2px solid var(--accent); outline-offset: 1px; }
+.stack-mini .mini:hover { color: var(--text); }
+.stack-toggle { display: block; width: 100%; background: none; border: none; border-top: 1px solid var(--line); color: var(--muted); padding: 7px; font-size: 12px; cursor: pointer; border-radius: 0 0 10px 10px; }
+.stack-toggle:hover { color: var(--accent-2); background: var(--panel-2); }
+.stack-toggle.inline { display: inline-block; width: auto; border: none; padding: 2px 6px; margin-left: 4px; border-radius: 5px; }
