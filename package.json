@@ -1,6 +1,6 @@
 {
   "name": "baton",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "Park pending work from Claude Code sessions as tasks, linked to sessions and GitHub PRs.",
   "main": "src/main.js",
   "bin": {

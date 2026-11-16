@@ -33,7 +33,7 @@ code, .mono { font-family: ui-monospace, 'SF Mono', Menlo, monospace; font-size:
 .sidebar { background: var(--panel); border-right: 1px solid var(--line); padding: 0 12px 12px; display: flex; flex-direction: column; }
 .brand { font-weight: 700; font-size: 15px; letter-spacing: 0.2px; margin: 0 4px 14px; }
 .brand { display: flex; align-items: center; gap: 8px; }
-.brand img { width: 22px; height: 22px; margin: -2px -2px -2px -4px; }
+.brand img { width: 28px; height: 28px; margin: -4px -4px -4px -6px; }
 nav { display: flex; flex-direction: column; gap: 2px; margin-top: 14px; }
 nav a { padding: 7px 10px; border-radius: 6px; cursor: default; color: var(--muted); display: flex; justify-content: space-between; }
 nav a:hover { background: var(--panel-2); color: var(--text); }
@@ -183,3 +183,10 @@ details.ctx summary:hover { color: var(--muted); }
 .settings-box { display: flex; flex-direction: column; gap: 6px; padding: 10px; border: 1px solid var(--line); border-radius: var(--radius); font-size: 12px; color: var(--muted); }
 .toggle { display: flex; gap: 8px; align-items: center; cursor: pointer; }
 .toggle input { width: auto; margin: 0; accent-color: var(--accent); }
+
+/* open-in-browser affordances */
+.open-btn { background: transparent; border: 1px solid transparent; color: var(--faint); border-radius: 6px; padding: 2px 7px; cursor: pointer; font-size: 13px; opacity: 0; flex-shrink: 0; align-self: center; }
+.item:hover .open-btn, .item.selected .open-btn, .stack-row:hover .open-btn { opacity: 1; }
+.open-btn:hover { color: var(--text); border-color: var(--line); background: var(--panel-2); }
+.pill.link { cursor: pointer; }
+.pill.link:hover { border-color: var(--blue); color: var(--text); }

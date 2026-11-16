@@ -283,12 +283,29 @@ function renderListHead() {
   }
 }
 
-function listItem({ selected, cls = '', onclick, lead, title, meta }) {
+function listItem({ selected, cls = '', onclick, ondblclick, lead, title, meta, trail }) {
   return h(
     'div',
-    { class: `item ${cls} ${selected ? 'selected' : ''}`, onclick },
+    { class: `item ${cls} ${selected ? 'selected' : ''}`, onclick, ondblclick },
     lead,
     h('div', { class: 'item-main' }, h('div', { class: 'item-title' }, title), h('div', { class: 'item-meta' }, meta)),
+    trail,
+  );
+}
+
+// Small "open in browser" button; stops the click from also selecting the row.
+function openButton(url, label = '↗') {
+  return h(
+    'button',
+    {
+      class: 'open-btn',
+      title: 'Open on GitHub (⌘-click or double-click the row also works)',
+      onclick: (e) => {
+        e.stopPropagation();
+        api.openUrl(url);
+      },
+    },
+    label,
   );
 }
 
@@ -332,7 +349,9 @@ function renderList() {
       return listItem({
         cls: pos ? 'stacked' : '',
         selected: state.selected === p.url,
-        onclick: () => select(p.url),
+        onclick: (e) => (e.metaKey ? api.openUrl(p.url) : select(p.url)),
+        ondblclick: () => api.openUrl(p.url),
+        trail: openButton(p.url),
         lead: pos ? h('span', { class: 'stack-pos' }, pos) : h('span', { class: `pr-dot ${p.draft ? 'draft' : ''}` }, '⇅'),
         title: p.title,
         meta: [
@@ -429,7 +448,18 @@ function renderList() {
       const p = prByUrl(ref.url);
       const bad = p && (p.checks === 'FAILURE' || p.reviewDecision === 'CHANGES_REQUESTED' || p.mergeable === 'CONFLICTING');
       const ok = p && p.reviewDecision === 'APPROVED' && p.checks === 'SUCCESS';
-      return h('span', { class: `pill ${bad ? 'bad' : ok ? 'ok' : ''}`, title: ref.title }, `#${ref.number}`);
+      return h(
+        'span',
+        {
+          class: `pill link ${bad ? 'bad' : ok ? 'ok' : ''}`,
+          title: `${ref.title || ''}\nClick to open on GitHub`.trim(),
+          onclick: (e) => {
+            e.stopPropagation();
+            api.openUrl(ref.url);
+          },
+        },
+        `#${ref.number} ↗`,
+      );
     });
     list.append(
       listItem({
@@ -827,6 +857,7 @@ function prDetail(p) {
               h('span', { class: 'stack-pos' }, `${i + 1}`),
               h('span', { class: 'grow' }, x.title),
               h('span', { class: 'row' }, prStatusPills(x, { compact: true })),
+              openButton(x.url),
             ),
           ),
         )
@@ -1076,6 +1107,10 @@ document.addEventListener('keydown', (e) => {
   if (e.metaKey && e.key === 'f') {
     e.preventDefault();
     $('#search').focus();
+  }
+  if (e.metaKey && e.key === 'o' && state.view === 'prs' && prByUrl(state.selected)) {
+    e.preventDefault();
+    api.openUrl(state.selected);
   }
   if (e.metaKey && e.key === 'r' && state.view === 'prs') {
     e.preventDefault();
