@@ -10,6 +10,8 @@ const state = {
   search: '',
   groupStacks: localStorage.getItem('groupStacks') !== '0',
   prFilter: localStorage.getItem('prFilter') || 'all', // all | ready | respond
+  notifications: [],
+  notifFilter: localStorage.getItem('notifFilter') || 'all', // all | unread
   stackOpen: JSON.parse(localStorage.getItem('stackOpen') || '{}'), // root PR url -> expanded?
 };
 
@@ -153,6 +155,9 @@ function prStatusPills(p, { compact } = {}) {
 async function loadTasks() {
   state.tasks = await api.listTasks();
 }
+async function loadNotifications() {
+  state.notifications = await api.listNotifications();
+}
 async function loadSessions() {
   state.sessions = await api.listSessions();
 }
@@ -195,7 +200,7 @@ function linkPRs(task, urls) {
 }
 
 // ---- rendering ------------------------------------------------------------
-const VIEW_TITLES = { open: 'Open', todo: 'To do', doing: 'In progress', done: 'Done', sessions: 'Claude sessions', prs: 'Pull requests' };
+const VIEW_TITLES = { notifications: 'Notifications', open: 'Open', todo: 'To do', doing: 'In progress', done: 'Done', sessions: 'Claude sessions', prs: 'Pull requests' };
 const STATUS_ORDER = { doing: 0, todo: 1, done: 2 };
 const PRIO_ORDER = { high: 0, normal: 1, low: 2 };
 
@@ -226,6 +231,7 @@ function render({ keepDetail } = {}) {
   }
   c.live = state.sessions.filter((s) => s.live).length || '';
   c.prs = state.prs ? state.prs.mine.length : '';
+  c.unread = state.notifications.filter((n) => !n.read).length || '';
   document.querySelectorAll('[data-count]').forEach((el) => (el.textContent = c[el.dataset.count] || ''));
   document.querySelectorAll('#nav a').forEach((a) => a.classList.toggle('active', a.dataset.view === state.view));
   renderListHead();
@@ -242,6 +248,35 @@ function renderListHead() {
   sb.hidden = state.view !== 'prs';
   sb.classList.toggle('on', state.groupStacks);
   sb.textContent = state.groupStacks ? '☑ Stacks' : '☐ Stacks';
+  const mb = $('#markAllBtn');
+  const nf = $('#notifFilters');
+  const isNotif = state.view === 'notifications';
+  const unread = state.notifications.filter((n) => !n.read).length;
+  mb.hidden = !isNotif;
+  mb.disabled = !unread;
+  nf.hidden = !isNotif;
+  if (isNotif) {
+    nf.replaceChildren(
+      ...[
+        ['all', 'All'],
+        ['unread', `Unread${unread ? ` ${unread}` : ''}`],
+      ].map(([v, label]) =>
+        h(
+          'button',
+          {
+            class: state.notifFilter === v ? 'on' : '',
+            onclick: () => {
+              state.notifFilter = v;
+              localStorage.setItem('notifFilter', v);
+              renderListHead();
+              renderList();
+            },
+          },
+          label,
+        ),
+      ),
+    );
+  }
   const pf = $('#prFilters');
   pf.hidden = state.view !== 'prs';
   if (state.view === 'prs') {
@@ -312,6 +347,49 @@ function openButton(url, label = '↗') {
 function renderList() {
   const list = $('#list');
   list.replaceChildren();
+
+  if (state.view === 'notifications') {
+    const items = state.notifications
+      .filter((n) => state.notifFilter === 'all' || !n.read)
+      .filter((n) => matches([n.title, n.body, n.prTitle, n.repo, n.number].join(' ')));
+    if (!items.length) {
+      list.append(
+        h(
+          'div',
+          { class: 'empty' },
+          state.search
+            ? 'No matches.'
+            : state.notifFilter === 'unread'
+              ? 'All caught up.'
+              : 'No notifications yet. Baton checks GitHub every 3 minutes and records when a PR or stack becomes ready to merge, or when someone comments on your PRs.',
+        ),
+      );
+    }
+    let lastDay = '';
+    for (const n of items) {
+      const day = dayLabel(n.createdAt);
+      if (day !== lastDay) {
+        list.append(h('div', { class: 'section-head' }, h('span', {}, day)));
+        lastDay = day;
+      }
+      list.append(
+        listItem({
+          cls: `notif ${n.read ? 'read' : 'unread'}`,
+          selected: state.selected === n.id,
+          onclick: () => openNotification(n),
+          lead: h('span', { class: `notif-icon ${n.kind}` }, n.kind === 'ready' ? '✓' : '💬'),
+          title: n.title,
+          meta: [
+            n.repo ? h('span', { class: 'mono' }, `${n.repo.split('/')[1]}#${n.number}`) : null,
+            h('span', { class: 'notif-body' }, n.body || ''),
+            h('span', {}, timeLabel(n.createdAt)),
+          ],
+          trail: n.read ? null : h('span', { class: 'unread-dot', title: 'Unread' }),
+        }),
+      );
+    }
+    return;
+  }
 
   if (state.view === 'sessions') {
     const items = state.sessions.filter((s) => matches([s.title, s.cwd, s.gitBranch, s.firstPrompt].join(' ')));
@@ -501,6 +579,10 @@ function renderDetail() {
   if (state.view === 'sessions') {
     const s = sessionById(state.selected);
     return pane.append(s ? sessionDetail(s) : emptyDetail('Pick a session to view its context or turn it into a task.'));
+  }
+  if (state.view === 'notifications') {
+    const n = state.notifications.find((x) => x.id === state.selected);
+    return pane.append(n ? notificationDetail(n) : emptyDetail('Select a notification.'));
   }
   if (state.view === 'prs') {
     const p = prByUrl(state.selected);
@@ -783,6 +865,133 @@ function sessionDetail(s) {
     prs.length ? card(`Pull requests (${prs.length})`, null, prs.map((p) => prRow(taskPR(p)))) : null,
     linkedTasksCard(state.tasks.filter((t) => t.sessions.some((x) => x.id === s.id))),
     card('Recent conversation', null, conversation(s.recent)),
+  );
+}
+
+// ---- notifications ------------------------------------------------------------
+function dayLabel(iso) {
+  const d = new Date(iso);
+  const today = new Date();
+  const y = new Date(today);
+  y.setDate(today.getDate() - 1);
+  if (d.toDateString() === today.toDateString()) return 'Today';
+  if (d.toDateString() === y.toDateString()) return 'Yesterday';
+  return d.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
+}
+const timeLabel = (iso) => new Date(iso).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+
+async function openNotification(n) {
+  state.selected = n.id;
+  if (!n.read) {
+    n.read = true;
+    await api.setNotificationsRead({ ids: [n.id], read: true }); // main pushes notifications:changed
+  }
+  render();
+}
+
+function showPRInBaton(url) {
+  state.view = 'prs';
+  state.prFilter = 'all';
+  state.search = '';
+  $('#search').value = '';
+  select(url);
+  setTimeout(() => document.querySelector('#list .item.selected')?.scrollIntoView({ block: 'center' }), 50);
+}
+
+function notificationDetail(n) {
+  const prUrls = n.stack ? n.stack.map((x) => x.url) : n.url ? [n.url] : [];
+  const live = prByUrl(n.url);
+  const refs = n.stack
+    ? n.stack.map((x) => ({ url: x.url, number: x.number, title: x.title, repo: n.repo }))
+    : n.url
+      ? [{ url: n.url, number: n.number, title: n.prTitle, repo: n.repo }]
+      : [];
+  const KIND = { 'review comment': 'commented', comment: 'commented', reviewed: 'reviewed', approved: 'approved', 'requested changes': 'requested changes' };
+
+  return h(
+    'div',
+    {},
+    h('div', { class: 'title-input', style: 'border:none' }, n.title),
+    h(
+      'div',
+      { class: 'row', style: 'margin-top:8px' },
+      h('span', { class: `pill ${n.kind === 'ready' ? 'ready' : 'claude'}` }, n.kind === 'ready' ? 'ready to merge' : 'comments'),
+      h('span', { class: 'pill' }, `${dayLabel(n.createdAt)} · ${timeLabel(n.createdAt)}`),
+      n.read ? null : h('span', { class: 'pill wait' }, 'unread'),
+      n.kind === 'ready' && live && !live.mergeReady ? h('span', { class: 'pill bad', title: 'Status changed since this notification' }, 'no longer ready') : null,
+      n.url && !live && state.prs ? h('span', { class: 'pill' }, 'merged or closed') : null,
+    ),
+    h(
+      'div',
+      { class: 'row', style: 'margin-top:14px' },
+      n.link ? h('button', { class: 'btn primary', onclick: () => api.openUrl(n.link) }, n.kind === 'comment' ? 'Open comment on GitHub ↗' : 'Open on GitHub ↗') : null,
+      live ? h('button', { class: 'btn', onclick: () => showPRInBaton(n.url) }, 'Show PR in Baton') : null,
+      prUrls.length
+        ? h(
+            'button',
+            {
+              class: 'btn',
+              onclick: () =>
+                openNewTask({
+                  title: n.kind === 'comment' ? `Address comments on #${n.number}: ${n.prTitle || ''}`.trim() : `Merge: ${n.body || n.prTitle || ''}`,
+                  prUrls: prUrls.filter((u) => prByUrl(u)),
+                  sessionIds: sessionsForPRs(prUrls.map(prByUrl).filter(Boolean)).slice(0, 3).map((x) => x.id),
+                }),
+            },
+            '+ Create task',
+          )
+        : null,
+      h('div', { style: 'flex:1' }),
+      h(
+        'button',
+        {
+          class: 'btn small ghost',
+          onclick: async () => {
+            await api.setNotificationsRead({ ids: [n.id], read: !n.read });
+          },
+        },
+        n.read ? 'Mark unread' : 'Mark read',
+      ),
+      h(
+        'button',
+        {
+          class: 'btn small ghost danger',
+          onclick: async () => {
+            state.selected = null;
+            await api.removeNotifications([n.id]);
+          },
+        },
+        'Delete',
+      ),
+    ),
+    n.comments?.length
+      ? card(
+          `Comments (${n.comments.length})`,
+          null,
+          n.comments.map((c) =>
+            h(
+              'div',
+              { class: 'comment' },
+              h(
+                'div',
+                { class: 'comment-head' },
+                h('b', {}, `@${c.author}`),
+                h('span', { class: 'muted' }, ` ${KIND[c.kind] || 'commented'} · ${c.at ? ago(c.at) : ''}`),
+                h('div', { style: 'flex:1' }),
+                c.url ? openButton(c.url) : null,
+              ),
+              c.body ? h('div', { class: 'comment-body' }, c.body) : null,
+            ),
+          ),
+        )
+      : n.body
+        ? card('Details', null, h('div', { class: 'summary' }, n.body))
+        : null,
+    refs.length ? card(refs.length > 1 ? `Stack (${refs.length} PRs) · current status` : 'Pull request · current status', null, refs.map((r) => prRow(r))) : null,
+    (() => {
+      const sess = sessionsForPRs(prUrls.map(prByUrl).filter(Boolean));
+      return sess.length ? card(`Claude sessions (${sess.length})`, null, sess.map((x) => sessionRow({ id: x.id, cwd: x.cwd, title: x.title, gitBranch: x.gitBranch }))) : null;
+    })(),
   );
 }
 
@@ -1137,6 +1346,20 @@ window.addEventListener('focus', async () => {
 });
 // The main process polls GitHub in the background and pushes results here.
 api.on('prs:updated', (r) => applyPRUpdate(r));
+api.on('notifications:changed', async () => {
+  await loadNotifications();
+  render({ keepDetail: isEditing() });
+});
+api.on('notifications:focus', async (id) => {
+  await loadNotifications();
+  state.view = 'notifications';
+  state.notifFilter = 'all';
+  state.search = '';
+  $('#search').value = '';
+  select(id);
+  setTimeout(() => document.querySelector('#list .item.selected')?.scrollIntoView({ block: 'center' }), 50);
+});
+$('#markAllBtn').addEventListener('click', () => api.setNotificationsRead({ ids: 'all', read: true }));
 api.on('prs:focus', (url) => {
   state.view = 'prs';
   state.search = '';
@@ -1171,7 +1394,7 @@ async function renderSettings() {
 }
 
 (async () => {
-  const [, , cached] = await Promise.all([loadTasks(), loadSessions(), api.cachedPRs()]);
+  const [, , cached] = await Promise.all([loadTasks(), loadSessions(), api.cachedPRs(), loadNotifications()]);
   state.prs = cached;
   render();
   renderSkillBox();

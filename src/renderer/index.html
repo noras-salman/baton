@@ -13,6 +13,8 @@
         <div class="brand"><img src="logo.svg" alt="" width="28" height="28" />Baton</div>
         <button class="btn primary block" id="newTaskBtn">+ New task <kbd>⌘N</kbd></button>
         <nav id="nav">
+          <a data-view="notifications">Notifications <span class="count unread" data-count="unread"></span></a>
+          <div class="nav-sep"></div>
           <a data-view="open" class="active">Open <span class="count" data-count="open"></span></a>
           <a data-view="todo">To do <span class="count" data-count="todo"></span></a>
           <a data-view="doing">In progress <span class="count" data-count="doing"></span></a>
@@ -40,10 +42,12 @@
             <span class="row">
               <button id="stackBtn" class="btn small" hidden title="Group stacked PRs (a PR based on another PR's branch)">Stacks</button>
               <button id="refreshBtn" class="btn small" hidden>Refresh</button>
+              <button id="markAllBtn" class="btn small" hidden>Mark all read</button>
             </span>
           </div>
           <div id="listSub" class="list-sub"></div>
           <div id="prFilters" class="seg filters" hidden></div>
+          <div id="notifFilters" class="seg filters" hidden></div>
           <input id="search" type="search" placeholder="Search…" />
         </div>
         <div id="list" class="list"></div>

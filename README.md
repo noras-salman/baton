@@ -28,6 +28,7 @@ npm start
 - **Ready to merge**: not a draft, approved (or no review required), checks passing, no conflicts, no unresolved threads. A PR in a stack only counts as ready when the whole stack is ready.
 - **To address**: your PRs with an unresolved review thread where someone else commented last, or with changes requested.
 - **Background watcher**: the app polls GitHub every 3 minutes, including while the window is closed, and sends macOS notifications when a PR or a whole stack becomes ready to merge, or when someone comments on or reviews your PRs. Each event is notified once, tracked in `~/.baton/pr-notify-state.json`. The installed app adds itself as a login item on first run; turn this off in the sidebar.
+- **Notifications history**: every notification is kept in the Notifications view (`~/.baton/notifications.json`, newest 500) with unread state, the comments that triggered it, a deep link to the comment, and the PR's current status. The Dock icon shows the unread count. Clicking a macOS banner marks it read and opens it in Baton. The notification toggles only mute the banners; history is always recorded.
 - **PR ↔ session matching**: a session counts as linked to a PR if its transcript recorded that PR (Claude Code writes a `pr-link` entry when a session creates or touches one) or if the session ran on the PR's branch.
 
 ## `/task` inside Claude Code

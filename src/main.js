@@ -7,6 +7,7 @@ const sessions = require('../lib/sessions');
 const skill = require('../lib/skill');
 const github = require('../lib/github');
 const prs = require('../lib/prs');
+const notifications = require('../lib/notifications');
 
 let win;
 
@@ -128,16 +129,40 @@ function send(channel, payload) {
   if (win && !win.isDestroyed()) win.webContents.send(channel, payload);
 }
 
-function notify(n) {
+// ---- notification history + Dock badge ----
+function updateBadge() {
+  const n = notifications.unreadCount();
+  if (app.dock) app.dock.setBadge(n ? String(n > 99 ? '99+' : n) : '');
+}
+
+function notificationsChanged() {
+  updateBadge();
+  send('notifications:changed');
+}
+
+// Run fn once the window's UI is loaded (creating/showing the window if needed).
+function whenUiReady(fn) {
+  showWindow();
+  if (win.webContents.isLoading()) win.webContents.once('did-finish-load', () => setTimeout(fn, 300));
+  else fn();
+}
+
+// Electron can garbage-collect Notification objects, which drops their click handlers.
+const liveNotes = new Set();
+function notify(entry) {
   if (!Notification.isSupported()) return;
-  const note = new Notification({ title: n.title, body: n.body || '', silent: false });
+  const note = new Notification({ title: entry.title, body: entry.body || '', silent: false });
+  liveNotes.add(note);
+  const forget = () => liveNotes.delete(note);
   note.on('click', () => {
-    showWindow();
-    const focus = () => send('prs:focus', n.url);
-    if (win.webContents.isLoading()) win.webContents.once('did-finish-load', () => setTimeout(focus, 300));
-    else focus();
+    forget();
+    notifications.setRead([entry.id]);
+    notificationsChanged();
+    whenUiReady(() => send('notifications:focus', entry.id));
   });
+  note.on('close', forget);
   note.show();
+  setTimeout(forget, 24 * 60 * 60 * 1000);
 }
 
 async function pollPRs() {
@@ -150,10 +175,13 @@ async function pollPRs() {
       writeJSON(PR_CACHE, data);
       prData = data;
       prError = '';
+      // Everything goes into the history; the toggles only control the macOS banner.
+      const added = notifications.add(notes);
       const s = settings();
-      for (const n of notes) {
+      for (const n of added) {
         if ((n.kind === 'ready' && s.notifyReady) || (n.kind === 'comment' && s.notifyComments)) notify(n);
       }
+      if (added.length) notificationsChanged();
     } catch (e) {
       prError = e.message;
     } finally {
@@ -165,6 +193,20 @@ async function pollPRs() {
 }
 
 ipcMain.handle('github:cached', () => prData);
+
+ipcMain.handle('notifications:list', () => notifications.read());
+ipcMain.handle('notifications:setRead', (_e, { ids, read }) => {
+  notifications.setRead(ids, read !== false);
+  notificationsChanged();
+});
+ipcMain.handle('notifications:remove', (_e, ids) => {
+  notifications.remove(ids);
+  notificationsChanged();
+});
+ipcMain.handle('notifications:clearRead', () => {
+  notifications.clearRead();
+  notificationsChanged();
+});
 ipcMain.handle('github:refresh', async () => {
   await pollPRs();
   return prError ? { error: prError, data: prData } : { data: prData };
@@ -220,6 +262,7 @@ app.whenReady().then(() => {
   const atLogin = app.isPackaged && app.getLoginItemSettings().wasOpenedAtLogin;
   if (!atLogin) createWindow();
   watch();
+  updateBadge();
   pollPRs();
   setInterval(pollPRs, POLL_MS);
   app.on('activate', showWindow);
