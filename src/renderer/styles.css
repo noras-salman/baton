@@ -32,7 +32,8 @@ code, .mono { font-family: ui-monospace, 'SF Mono', Menlo, monospace; font-size:
 /* sidebar */
 .sidebar { background: var(--panel); border-right: 1px solid var(--line); padding: 0 12px 12px; display: flex; flex-direction: column; }
 .brand { font-weight: 700; font-size: 15px; letter-spacing: 0.2px; margin: 0 4px 14px; }
-.brand::before { content: '●'; color: var(--accent); margin-right: 6px; }
+.brand { display: flex; align-items: center; gap: 8px; }
+.brand img { width: 22px; height: 22px; margin: -2px -2px -2px -4px; }
 nav { display: flex; flex-direction: column; gap: 2px; margin-top: 14px; }
 nav a { padding: 7px 10px; border-radius: 6px; cursor: default; color: var(--muted); display: flex; justify-content: space-between; }
 nav a:hover { background: var(--panel-2); color: var(--text); }
