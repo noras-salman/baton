@@ -9,6 +9,7 @@ const state = {
   selected: null, // task id | session id | PR url, depending on view
   search: '',
   groupStacks: localStorage.getItem('groupStacks') !== '0',
+  prFilter: localStorage.getItem('prFilter') || 'all', // all | ready | respond
   stackOpen: JSON.parse(localStorage.getItem('stackOpen') || '{}'), // root PR url -> expanded?
 };
 
@@ -106,11 +107,14 @@ function stackHealth(stack) {
   const changes = stack.filter((p) => p.reviewDecision === 'CHANGES_REQUESTED').length;
   const threads = stack.reduce((a, p) => a + (p.unresolvedThreads || 0), 0);
   const conflicts = stack.filter((p) => p.mergeable === 'CONFLICTING').length;
+  const awaiting = stack.reduce((a, p) => a + (p.awaitingReply || 0), 0);
+  if (stack.every((p) => p.mergeReady)) return [h('span', { class: 'pill ready' }, '✓ whole stack ready to merge')];
   return [
+    awaiting ? h('span', { class: 'pill bad' }, `💬 ${awaiting} to address`) : null,
     h('span', { class: `pill ${approved === n ? 'ok' : ''}` }, `${approved}/${n} approved`),
     failing ? h('span', { class: 'pill bad' }, `✗ ${failing} failing`) : h('span', { class: 'pill ok' }, '✓ CI'),
     changes ? h('span', { class: 'pill bad' }, `${changes} changes requested`) : null,
-    threads ? h('span', { class: 'pill wait' }, `💬 ${threads}`) : null,
+    threads && !awaiting ? h('span', { class: 'pill wait' }, `💬 ${threads}`) : null,
     conflicts ? h('span', { class: 'pill bad' }, `${conflicts} conflicting`) : null,
   ];
 }
@@ -137,7 +141,10 @@ function prStatusPills(p, { compact } = {}) {
   if (p.reviewDecision === 'APPROVED') out.push(h('span', { class: 'pill ok' }, 'approved'));
   else if (p.reviewDecision === 'CHANGES_REQUESTED') out.push(h('span', { class: 'pill bad' }, 'changes requested'));
   else if (p.reviewDecision === 'REVIEW_REQUIRED' && !compact) out.push(h('span', { class: 'pill' }, 'review required'));
-  if (p.unresolvedThreads) out.push(h('span', { class: 'pill wait' }, `💬 ${p.unresolvedThreads}`));
+  if (p.mergeReady) out.unshift(h('span', { class: 'pill ready' }, '✓ ready to merge'));
+  else if (p.ready && p.stackSize > 1) out.unshift(h('span', { class: 'pill', title: 'This PR is ready, but other PRs in its stack are not' }, 'ready · waiting on stack'));
+  if (p.awaitingReply) out.push(h('span', { class: 'pill bad', title: 'Unresolved threads where someone else spoke last' }, `💬 ${p.awaitingReply} to address`));
+  else if (p.unresolvedThreads) out.push(h('span', { class: 'pill wait' }, `💬 ${p.unresolvedThreads}`));
   if (p.mergeable === 'CONFLICTING') out.push(h('span', { class: 'pill bad' }, 'conflicts'));
   return out;
 }
@@ -155,13 +162,13 @@ async function refreshPRs({ quiet } = {}) {
   renderListHead();
   const r = await api.refreshPRs();
   state.prLoading = false;
-  if (r.error) {
-    state.prError = r.error;
-    if (!quiet) toast(`GitHub: ${r.error}`);
-  } else {
-    state.prs = r.data;
-    state.prError = '';
-  }
+  applyPRUpdate(r);
+  if (r.error && !quiet) toast(`GitHub: ${r.error}`);
+}
+
+function applyPRUpdate({ data, error }) {
+  if (data) state.prs = data;
+  state.prError = error || '';
   render({ keepDetail: isEditing() });
 }
 
@@ -235,6 +242,35 @@ function renderListHead() {
   sb.hidden = state.view !== 'prs';
   sb.classList.toggle('on', state.groupStacks);
   sb.textContent = state.groupStacks ? '☑ Stacks' : '☐ Stacks';
+  const pf = $('#prFilters');
+  pf.hidden = state.view !== 'prs';
+  if (state.view === 'prs') {
+    const mine = state.prs ? state.prs.mine : [];
+    const readyUnits = new Set(mine.filter((p) => p.mergeReady).map((p) => p.stackRoot || p.url)).size;
+    const respond = mine.filter((p) => p.needsResponse).length;
+    const opts = [
+      ['all', 'All'],
+      ['ready', `Ready to merge${readyUnits ? ` ${readyUnits}` : ''}`],
+      ['respond', `To address${respond ? ` ${respond}` : ''}`],
+    ];
+    pf.replaceChildren(
+      ...opts.map(([v, label]) =>
+        h(
+          'button',
+          {
+            class: state.prFilter === v ? 'on' : '',
+            onclick: () => {
+              state.prFilter = v;
+              localStorage.setItem('prFilter', v);
+              renderListHead();
+              renderList();
+            },
+          },
+          label,
+        ),
+      ),
+    );
+  }
   btn.disabled = state.prLoading;
   btn.textContent = state.prLoading ? 'Refreshing…' : 'Refresh';
   sub.className = 'list-sub';
@@ -309,17 +345,30 @@ function renderList() {
       });
     };
     const section = (label, prs) => {
-      const items = prs.filter((p) => matches([p.title, p.repo, p.number, p.branch, p.author].join(' ')));
-      list.append(h('div', { class: 'section-head' }, h('span', {}, label), h('span', {}, items.length)));
-      if (!items.length) list.append(h('div', { class: 'empty', style: 'padding:12px' }, 'None'));
-      if (!state.groupStacks) return items.forEach((p) => list.append(prItem(p)));
-      for (const stack of buildStacks(items)) {
-        if (stack.length === 1) {
+      const searched = prs.filter((p) => matches([p.title, p.repo, p.number, p.branch, p.author].join(' ')));
+      const f = state.prFilter;
+      const keep = (p) => f === 'all' || (f === 'ready' ? p.mergeReady : p.needsResponse);
+      // Readiness is stack-aware (mergeReady), so a ready stack shows whole; "needs response" shows
+      // only the matching PRs, still under their stack header for context.
+      const groups = (state.groupStacks ? buildStacks(searched) : searched.map((p) => [p]))
+        .map((g) => (f === 'respond' ? g.filter(keep) : g.every(keep) ? g : []))
+        .filter((g) => g.length);
+      const count = groups.reduce((a, g) => a + g.length, 0);
+      list.append(h('div', { class: 'section-head' }, h('span', {}, label), h('span', {}, count)));
+      if (!count) list.append(h('div', { class: 'empty', style: 'padding:12px' }, f === 'ready' ? 'Nothing ready to merge.' : f === 'respond' ? 'No comments waiting on you.' : 'None'));
+      for (const stack of groups) {
+        if (stack.length === 1 && !(state.groupStacks && stack[0].stackSize > 1)) {
           list.append(prItem(stack[0]));
           continue;
         }
         const containsSelected = stack.some((p) => p.url === state.selected);
-        const open = containsSelected || (state.stackOpen[stack[0].url] ?? stack.length <= 5);
+        // Header, health and "+ Task" always describe the whole stack, even when a filter hides members.
+        const full = stack[0].stackRoot
+          ? allPRs()
+              .filter((p, i, arr) => p.stackRoot === stack[0].stackRoot && arr.findIndex((x) => x.url === p.url) === i)
+              .sort((a, b) => a.stackIndex - b.stackIndex)
+          : stack;
+        const open = containsSelected || state.prFilter !== 'all' || (state.stackOpen[full[0].url] ?? full.length <= 5);
         list.append(
           h(
             'div',
@@ -329,7 +378,7 @@ function renderList() {
               {
                 class: 'stack-head',
                 onclick: () => {
-                  state.stackOpen[stack[0].url] = !open;
+                  state.stackOpen[full[0].url] = !open;
                   localStorage.setItem('stackOpen', JSON.stringify(state.stackOpen));
                   renderList();
                 },
@@ -338,8 +387,8 @@ function renderList() {
               h(
                 'div',
                 { class: 'item-main' },
-                h('div', { class: 'stack-title', title: stackName(stack) }, `Stack of ${stack.length} · ${stackName(stack)}`),
-                h('div', { class: 'item-meta' }, h('span', { class: 'mono' }, `${stack[0].base} ←`), stackHealth(stack)),
+                h('div', { class: 'stack-title', title: stackName(full) }, `Stack of ${full.length} · ${stackName(full)}`),
+                h('div', { class: 'item-meta' }, h('span', { class: 'mono' }, `${full[0].base} ←`), stackHealth(full)),
               ),
               h(
                 'button',
@@ -348,18 +397,19 @@ function renderList() {
                   title: 'Create a task linked to every PR in this stack and the sessions that worked on them',
                   onclick: (e) =>
                     e.stopPropagation() ||
-                    openNewTask({ title: stackName(stack), prUrls: stack.map((p) => p.url), sessionIds: sessionsForPRs(stack).map((x) => x.id) }),
+                    openNewTask({ title: stackName(full), prUrls: full.map((p) => p.url), sessionIds: sessionsForPRs(full).map((x) => x.id) }),
                 },
                 '+ Task',
               ),
             ),
-            open ? stack.map((p, i) => prItem(p, { pos: `${i + 1}/${stack.length}` })) : null,
+            open ? stack.map((p) => prItem(p, { pos: `${(p.stackIndex ?? 0) + 1}/${p.stackSize || stack.length}` })) : null,
           ),
         );
       }
     };
     section('Your PRs', state.prs.mine);
-    section('Review requested', state.prs.review);
+    // "To address" is about comments on your own PRs; review requests don't apply.
+    if (state.prFilter !== 'respond') section('Review requested', state.prs.review);
     return;
   }
 
@@ -1050,12 +1100,45 @@ window.addEventListener('focus', async () => {
   await Promise.all([loadTasks(), loadSessions()]);
   render({ keepDetail: isEditing() });
 });
-setInterval(() => refreshPRs({ quiet: true }), 5 * 60 * 1000);
+// The main process polls GitHub in the background and pushes results here.
+api.on('prs:updated', (r) => applyPRUpdate(r));
+api.on('prs:focus', (url) => {
+  state.view = 'prs';
+  state.search = '';
+  $('#search').value = '';
+  state.prFilter = 'all';
+  select(url);
+  setTimeout(() => document.querySelector('#list .item.selected')?.scrollIntoView({ block: 'center' }), 50);
+});
+
+async function renderSettings() {
+  const st = await api.getSettings();
+  const toggle = (key, label, title) =>
+    h(
+      'label',
+      { class: 'toggle', title },
+      h('input', {
+        type: 'checkbox',
+        checked: st[key] ? true : null,
+        onchange: async (e) => {
+          await api.setSettings({ [key]: e.target.checked });
+          renderSettings();
+        },
+      }),
+      label,
+    );
+  $('#settingsBox').replaceChildren(
+    h('div', { class: 'field-label', style: 'margin-top:0' }, 'Notify me when'),
+    toggle('notifyReady', 'A PR or stack is ready to merge'),
+    toggle('notifyComments', 'Someone comments on my PRs'),
+    ...(st.canLaunchAtLogin ? [toggle('openAtLogin', 'Run at login (background)', 'Keeps the PR watcher running after restarts')] : []),
+  );
+}
 
 (async () => {
   const [, , cached] = await Promise.all([loadTasks(), loadSessions(), api.cachedPRs()]);
   state.prs = cached;
   render();
   renderSkillBox();
-  refreshPRs({ quiet: true });
+  renderSettings();
 })();

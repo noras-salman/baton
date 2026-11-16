@@ -16,9 +16,11 @@ contextBridge.exposeInMainWorld('api', {
   openUrl: invoke('open:url'),
   cachedPRs: invoke('github:cached'),
   refreshPRs: invoke('github:refresh'),
+  getSettings: invoke('settings:get'),
+  setSettings: invoke('settings:set'),
   skillStatus: invoke('skill:status'),
   installSkill: invoke('skill:install'),
   on: (channel, fn) => {
-    if (['tasks:changed', 'sessions:changed'].includes(channel)) ipcRenderer.on(channel, () => fn());
+    if (['tasks:changed', 'sessions:changed', 'prs:updated', 'prs:focus'].includes(channel)) ipcRenderer.on(channel, (_e, payload) => fn(payload));
   },
 });

@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, clipboard, shell, dialog } = require('electron');
+const { app, BrowserWindow, ipcMain, clipboard, shell, dialog, Notification } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const { execFile } = require('child_process');
@@ -6,6 +6,7 @@ const store = require('../lib/store');
 const sessions = require('../lib/sessions');
 const skill = require('../lib/skill');
 const github = require('../lib/github');
+const prs = require('../lib/prs');
 
 let win;
 
@@ -94,26 +95,91 @@ ipcMain.handle('open:url', (_e, url) => {
   if (/^https:\/\//.test(url)) shell.openExternal(url);
 });
 
-// GitHub PRs via the local `gh` login. Last result is cached on disk so startup is instant.
+// ---- GitHub PRs: background poller + notifications ----------------------------
+// Uses the local `gh` login. Runs in the main process so it keeps working with the window closed.
 const PR_CACHE = path.join(store.DATA_DIR, 'prs-cache.json');
-let prInflight = null;
-ipcMain.handle('github:cached', () => {
+const PR_STATE = path.join(store.DATA_DIR, 'pr-notify-state.json');
+const SETTINGS = path.join(store.DATA_DIR, 'settings.json');
+const POLL_MS = 3 * 60 * 1000;
+
+const readJSON = (f, dflt) => {
   try {
-    return JSON.parse(fs.readFileSync(PR_CACHE, 'utf8'));
+    return JSON.parse(fs.readFileSync(f, 'utf8'));
   } catch {
-    return null;
+    return dflt;
   }
-});
+};
+const writeJSON = (f, v) => {
+  fs.mkdirSync(store.DATA_DIR, { recursive: true });
+  const tmp = `${f}.${process.pid}.tmp`;
+  fs.writeFileSync(tmp, JSON.stringify(v));
+  fs.renameSync(tmp, f);
+};
+
+function settings() {
+  return { notifyReady: true, notifyComments: true, ...readJSON(SETTINGS, {}) };
+}
+
+let prData = readJSON(PR_CACHE, null);
+let prError = '';
+let prInflight = null;
+
+function send(channel, payload) {
+  if (win && !win.isDestroyed()) win.webContents.send(channel, payload);
+}
+
+function notify(n) {
+  if (!Notification.isSupported()) return;
+  const note = new Notification({ title: n.title, body: n.body || '', silent: false });
+  note.on('click', () => {
+    showWindow();
+    const focus = () => send('prs:focus', n.url);
+    if (win.webContents.isLoading()) win.webContents.once('did-finish-load', () => setTimeout(focus, 300));
+    else focus();
+  });
+  note.show();
+}
+
+async function pollPRs() {
+  if (prInflight) return prInflight;
+  prInflight = (async () => {
+    try {
+      const data = prs.annotate(await github.fetchPRs());
+      const { notes, state } = prs.diff(readJSON(PR_STATE, {}), data);
+      writeJSON(PR_STATE, state);
+      writeJSON(PR_CACHE, data);
+      prData = data;
+      prError = '';
+      const s = settings();
+      for (const n of notes) {
+        if ((n.kind === 'ready' && s.notifyReady) || (n.kind === 'comment' && s.notifyComments)) notify(n);
+      }
+    } catch (e) {
+      prError = e.message;
+    } finally {
+      prInflight = null;
+      send('prs:updated', { data: prData, error: prError });
+    }
+  })();
+  return prInflight;
+}
+
+ipcMain.handle('github:cached', () => prData);
 ipcMain.handle('github:refresh', async () => {
-  prInflight = prInflight || github.fetchPRs().finally(() => (prInflight = null));
-  try {
-    const data = await prInflight;
-    fs.mkdirSync(store.DATA_DIR, { recursive: true });
-    fs.writeFileSync(PR_CACHE, JSON.stringify(data));
-    return { data };
-  } catch (e) {
-    return { error: e.message };
-  }
+  await pollPRs();
+  return prError ? { error: prError, data: prData } : { data: prData };
+});
+
+ipcMain.handle('settings:get', () => ({
+  ...settings(),
+  openAtLogin: app.isPackaged ? app.getLoginItemSettings().openAtLogin : false,
+  canLaunchAtLogin: app.isPackaged,
+}));
+ipcMain.handle('settings:set', (_e, patch) => {
+  const { openAtLogin, ...rest } = patch || {};
+  if (typeof openAtLogin === 'boolean' && app.isPackaged) app.setLoginItemSettings({ openAtLogin, openAsHidden: true });
+  writeJSON(SETTINGS, { ...readJSON(SETTINGS, {}), ...rest });
+  return true;
 });
 
 ipcMain.handle('skill:status', () => skill.status());
@@ -122,10 +188,10 @@ ipcMain.handle('skill:install', () => skill.install());
 // Push updates to the UI when the CLI (/task skill) writes tasks or sessions change.
 function watch() {
   fs.mkdirSync(store.DATA_DIR, { recursive: true });
-  let t;
+  const timers = {};
   const ping = (channel) => {
-    clearTimeout(t);
-    t = setTimeout(() => win && !win.isDestroyed() && win.webContents.send(channel), 150);
+    clearTimeout(timers[channel]);
+    timers[channel] = setTimeout(() => send(channel), 150);
   };
   fs.watch(store.DATA_DIR, (_ev, name) => name && name.startsWith('tasks.json') && ping('tasks:changed'));
   try {
@@ -135,9 +201,28 @@ function watch() {
   }
 }
 
+function showWindow() {
+  if (!win || win.isDestroyed()) createWindow();
+  else {
+    if (win.isMinimized()) win.restore();
+    win.show();
+    win.focus();
+  }
+}
+
 app.whenReady().then(() => {
-  createWindow();
+  // First run of the installed app: start at login so PR notifications keep working.
+  const s = readJSON(SETTINGS, {});
+  if (app.isPackaged && !s.loginItemConfigured) {
+    app.setLoginItemSettings({ openAtLogin: true, openAsHidden: true });
+    writeJSON(SETTINGS, { ...s, loginItemConfigured: true });
+  }
+  const atLogin = app.isPackaged && app.getLoginItemSettings().wasOpenedAtLogin;
+  if (!atLogin) createWindow();
   watch();
-  app.on('activate', () => BrowserWindow.getAllWindows().length === 0 && createWindow());
+  pollPRs();
+  setInterval(pollPRs, POLL_MS);
+  app.on('activate', showWindow);
 });
-app.on('window-all-closed', () => app.quit());
+// Keep running in the background (Dock icon stays) so the PR watcher can notify you.
+app.on('window-all-closed', () => {});
