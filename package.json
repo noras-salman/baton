@@ -9,7 +9,8 @@
   "scripts": {
     "start": "env -u ELECTRON_RUN_AS_NODE electron .",
     "install-skill": "node bin/baton.js install-skill",
-    "dist": "electron-builder --mac dmg"
+    "dist": "electron-builder --mac dmg",
+    "postdist": "rm -rf dist/mac-arm64"
   },
   "license": "UNLICENSED",
   "private": true,
