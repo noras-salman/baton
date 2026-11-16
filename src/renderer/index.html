@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'" />
+    <title>Baton</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="app">
+      <aside class="sidebar">
+        <div class="drag"></div>
+        <div class="brand">Baton</div>
+        <button class="btn primary block" id="newTaskBtn">+ New task <kbd>⌘N</kbd></button>
+        <nav id="nav">
+          <a data-view="open" class="active">Open <span class="count" data-count="open"></span></a>
+          <a data-view="todo">To do <span class="count" data-count="todo"></span></a>
+          <a data-view="doing">In progress <span class="count" data-count="doing"></span></a>
+          <a data-view="done">Done <span class="count" data-count="done"></span></a>
+          <div class="nav-sep"></div>
+          <a data-view="sessions">Claude sessions <span class="count" data-count="live"></span></a>
+          <a data-view="prs">Pull requests <span class="count" data-count="prs"></span></a>
+        </nav>
+        <div class="sidebar-foot">
+          <label class="field-label" for="terminalSel">Resume in</label>
+          <select id="terminalSel">
+            <option value="terminal">Terminal</option>
+            <option value="iterm">iTerm</option>
+          </select>
+          <div id="skillBox" class="skill-box"></div>
+        </div>
+      </aside>
+
+      <section class="list-pane">
+        <div class="drag"></div>
+        <div class="list-head">
+          <div class="row" style="justify-content:space-between">
+            <h1 id="listTitle">Open</h1>
+            <span class="row">
+              <button id="stackBtn" class="btn small" hidden title="Group stacked PRs (a PR based on another PR's branch)">Stacks</button>
+              <button id="refreshBtn" class="btn small" hidden>Refresh</button>
+            </span>
+          </div>
+          <div id="listSub" class="list-sub"></div>
+          <input id="search" type="search" placeholder="Search…" />
+        </div>
+        <div id="list" class="list"></div>
+      </section>
+
+      <main class="detail-pane" id="detail"></main>
+    </div>
+
+    <dialog id="newTaskDlg">
+      <form method="dialog" id="newTaskForm">
+        <h2>New task</h2>
+        <label class="field-label">Title</label>
+        <input name="title" required placeholder="What's pending?" autocomplete="off" />
+        <label class="field-label">Notes</label>
+        <textarea name="notes" rows="3" placeholder="Optional"></textarea>
+        <label class="field-label">Links</label>
+        <div id="draftLinks" class="chips"></div>
+        <div class="row" style="margin-top:8px">
+          <button type="button" class="btn small" id="addSessionsBtn">+ Claude sessions</button>
+          <button type="button" class="btn small" id="addPRsBtn">+ Pull requests</button>
+        </div>
+        <div class="dlg-actions">
+          <button type="button" class="btn" value="cancel" id="cancelNew">Cancel</button>
+          <button type="submit" class="btn primary" value="ok">Create task</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="pickDlg"></dialog>
+
+    <div id="toast" class="toast"></div>
+    <script src="app.js"></script>
+  </body>
+</html>

@@ -1,0 +1,64 @@
+{
+  "name": "baton",
+  "version": "0.1.0",
+  "description": "Park pending work from Claude Code sessions as tasks, linked to sessions and GitHub PRs.",
+  "main": "src/main.js",
+  "bin": {
+    "baton": "bin/baton.js"
+  },
+  "scripts": {
+    "start": "env -u ELECTRON_RUN_AS_NODE electron .",
+    "install-skill": "node bin/baton.js install-skill",
+    "dist": "electron-builder --mac dmg"
+  },
+  "license": "UNLICENSED",
+  "private": true,
+  "devDependencies": {
+    "electron": "^45.3.3",
+    "electron-builder": "^26.18.0"
+  },
+  "productName": "Baton",
+  "build": {
+    "appId": "app.baton.tasks",
+    "productName": "Baton",
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "files": [
+      "src/**",
+      "lib/**",
+      "bin/**",
+      "skill/**",
+      "package.json"
+    ],
+    "asarUnpack": [
+      "bin/**",
+      "lib/**",
+      "skill/**"
+    ],
+    "mac": {
+      "category": "public.app-category.developer-tools",
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64"
+          ]
+        }
+      ],
+      "icon": "build/icon.png",
+      "identity": "-",
+      "hardenedRuntime": false
+    },
+    "dmg": {
+      "title": "Baton"
+    },
+    "electronFuses": {
+      "runAsNode": false,
+      "enableNodeCliInspectArguments": false,
+      "enableNodeOptionsEnvironmentVariable": false
+    }
+  },
+  "author": "Baton"
+}
