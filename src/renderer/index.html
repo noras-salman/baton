@@ -25,13 +25,9 @@
           <a data-view="reviews">Review requests <span class="count" data-count="reviews"></span></a>
         </nav>
         <div class="sidebar-foot">
-          <label class="field-label" for="terminalSel">Resume in</label>
-          <select id="terminalSel">
-            <option value="terminal">Terminal</option>
-            <option value="iterm">iTerm</option>
-          </select>
-          <div id="settingsBox" class="settings-box"></div>
-          <div id="skillBox" class="skill-box"></div>
+          <nav class="foot-nav">
+            <a data-view="settings">⚙ Settings</a>
+          </nav>
         </div>
       </aside>
 
@@ -45,6 +41,7 @@
               <button id="stackBtn" class="btn small" hidden title="Group stacked PRs (a PR based on another PR's branch)">Stacks</button>
               <button id="refreshBtn" class="btn small" hidden>Refresh</button>
               <button id="markAllBtn" class="btn small" hidden>Mark all read</button>
+              <button id="clearAllBtn" class="btn small ghost danger" hidden>Clear all</button>
             </span>
           </div>
           <div id="listSub" class="list-sub"></div>
@@ -73,12 +70,14 @@
         </div>
         <div class="dlg-actions">
           <button type="button" class="btn" value="cancel" id="cancelNew">Cancel</button>
-          <button type="submit" class="btn primary" value="ok">Create task</button>
+          <button type="submit" class="btn" value="ok">Create task</button>
+          <button type="submit" class="btn primary" value="start" title="Create the task, then have Claude take a first pass at it">Create &amp; start Claude ✦</button>
         </div>
       </form>
     </dialog>
 
     <dialog id="pickDlg"></dialog>
+    <dialog id="startDlg"></dialog>
 
     <div id="toast" class="toast"></div>
     <script src="app.js"></script>

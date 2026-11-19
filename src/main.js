@@ -86,6 +86,30 @@ ipcMain.handle('session:resume', async (_e, { sessionId, cwd, terminal }) => {
   await openInTerminal(resumeCommand(sessionId, cwd), terminal);
   return { ok: true };
 });
+// Start a brand-new Claude Code session for a task. The session id is chosen here so the
+// task can link to it immediately; the prompt goes through a file to avoid quoting issues.
+const START_MODES = new Set(['plan', 'acceptEdits', 'default']);
+ipcMain.handle('session:start', async (_e, { cwd, prompt, name, mode, terminal }) => {
+  if (!cwd || !fs.existsSync(cwd)) throw new Error(`Folder not found: ${cwd}`);
+  if (!prompt || !prompt.trim()) throw new Error('Nothing to send to Claude');
+  const sessionId = require('crypto').randomUUID();
+  const dir = path.join(store.DATA_DIR, 'prompts');
+  fs.mkdirSync(dir, { recursive: true });
+  const file = path.join(dir, `${sessionId}.md`);
+  fs.writeFileSync(file, prompt);
+  const flags = [`--session-id ${sessionId}`];
+  if (name) flags.push(`--name ${shq(String(name).slice(0, 80))}`);
+  if (START_MODES.has(mode) && mode !== 'default') flags.push(`--permission-mode ${mode}`);
+  const cmd = `cd ${shq(cwd)} && claude ${flags.join(' ')} "$(cat ${shq(file)})"`;
+  await openInTerminal(cmd, terminal);
+  return { sessionId, cwd };
+});
+
+ipcMain.handle('dialog:pickFolder', async (_e, defaultPath) => {
+  const r = await dialog.showOpenDialog(win, { properties: ['openDirectory'], defaultPath: defaultPath || require('os').homedir() });
+  return r.canceled ? null : r.filePaths[0];
+});
+
 ipcMain.handle('session:command', (_e, { sessionId, cwd }) => resumeCommand(sessionId, cwd));
 ipcMain.handle('clipboard:write', (_e, text) => clipboard.writeText(String(text)));
 ipcMain.handle('open:folder', (_e, dir) => shell.openPath(dir));
@@ -118,8 +142,10 @@ const writeJSON = (f, v) => {
 };
 
 function settings() {
-  return { notifyReady: true, notifyComments: true, ...readJSON(SETTINGS, {}) };
+  return readJSON(SETTINGS, {});
 }
+// What you want to be notified about (see lib/prs.js DEFAULT_PREFS).
+const prefs = () => prs.prefsFrom(settings());
 
 let prData = readJSON(PR_CACHE, null);
 let prError = '';
@@ -131,7 +157,7 @@ function send(channel, payload) {
 
 // ---- notification history + Dock badge ----
 function updateBadge() {
-  const n = notifications.unreadCount();
+  const n = prefs().dockBadge ? notifications.unreadCount() : 0;
   if (app.dock) app.dock.setBadge(n ? String(n > 99 ? '99+' : n) : '');
 }
 
@@ -179,6 +205,52 @@ function notify(entry) {
   setTimeout(forget, 24 * 60 * 60 * 1000);
 }
 
+// Filters events by your preferences, records them, and shows banners.
+function deliver(events) {
+  const p = prefs();
+  const added = notifications.add(prs.applyPrefs(events, p));
+  if (p.banners) for (const n of added) notify(n);
+  if (added.length) notificationsChanged();
+}
+
+// ---- Claude session watcher: notify when a session finishes a turn ------------------
+// Claude Code writes ~/.claude/sessions/<pid>.json with status busy|idle for each live session.
+const sessionSeen = new Map(); // sessionId -> { status, since }
+const snip = (t) => String(t || '').replace(/\s+/g, ' ').trim().slice(0, 240);
+
+function checkSessions() {
+  const live = sessions.liveSessions();
+  const minSeconds = prefs().sessionMinSeconds;
+  for (const [id, cur] of live) {
+    const since = cur.statusUpdatedAt || Date.now();
+    const prev = sessionSeen.get(id);
+    sessionSeen.set(id, { status: cur.status, since });
+    if (!prev || prev.status === cur.status) continue;
+    if (prev.status !== 'busy' || cur.status === 'busy') continue;
+    const ranFor = (since - prev.since) / 1000;
+    if (ranFor < minSeconds) continue;
+    // Give Claude Code a moment to flush the final message to the transcript.
+    setTimeout(() => {
+      const s = sessions.getSession(id);
+      const title = (s && s.title) || cur.name || 'Claude session';
+      const mins = ranFor >= 90 ? `${Math.round(ranFor / 60)} min` : `${Math.round(ranFor)} s`;
+      deliver([
+        {
+          kind: 'session',
+          sessionId: id,
+          cwd: (s && s.cwd) || cur.cwd || '',
+          gitBranch: (s && s.gitBranch) || '',
+          ranFor,
+          title: `Claude finished: ${title}`,
+          body: snip(s && s.lastAssistant) || `Done after ${mins}. Waiting for you.`,
+          lastPrompt: snip(s && s.lastPrompt),
+        },
+      ]);
+    }, 1500);
+  }
+  for (const id of [...sessionSeen.keys()]) if (!live.has(id)) sessionSeen.delete(id);
+}
+
 async function pollPRs() {
   if (prInflight) return prInflight;
   prInflight = (async () => {
@@ -189,13 +261,7 @@ async function pollPRs() {
       writeJSON(PR_CACHE, data);
       prData = data;
       prError = '';
-      // Everything goes into the history; the toggles only control the macOS banner.
-      const added = notifications.add(notes);
-      const s = settings();
-      for (const n of added) {
-        if ((n.kind === 'ready' && s.notifyReady) || (n.kind === 'comment' && s.notifyComments)) notify(n);
-      }
-      if (added.length) notificationsChanged();
+      deliver(notes);
     } catch (e) {
       prError = e.message;
     } finally {
@@ -218,6 +284,10 @@ ipcMain.handle('notifications:remove', (_e, ids) => {
   notifications.remove(ids);
   notificationsChanged();
 });
+ipcMain.handle('notifications:clearAll', () => {
+  notifications.clearAll();
+  notificationsChanged();
+});
 ipcMain.handle('notifications:clearRead', () => {
   notifications.clearRead();
   notificationsChanged();
@@ -229,13 +299,19 @@ ipcMain.handle('github:refresh', async () => {
 
 ipcMain.handle('settings:get', () => ({
   ...settings(),
+  notify: prefs(),
+  // Repos you can mute: everything currently in your PR lists plus anything already muted.
+  repos: [...new Set([...(prData ? [...prData.mine, ...prData.review].map((p) => p.repo) : []), ...prefs().mutedRepos])].sort(),
   openAtLogin: app.isPackaged ? app.getLoginItemSettings().openAtLogin : false,
   canLaunchAtLogin: app.isPackaged,
 }));
 ipcMain.handle('settings:set', (_e, patch) => {
-  const { openAtLogin, ...rest } = patch || {};
+  const { openAtLogin, notify, ...rest } = patch || {};
   if (typeof openAtLogin === 'boolean' && app.isPackaged) app.setLoginItemSettings({ openAtLogin, openAsHidden: true });
-  writeJSON(SETTINGS, { ...readJSON(SETTINGS, {}), ...rest });
+  const cur = settings();
+  writeJSON(SETTINGS, { ...cur, ...rest, ...(notify ? { notify: { ...prefs(), ...notify } } : {}) });
+  if (notify && 'dockBadge' in notify) updateBadge();
+  send('settings:changed');
   return true;
 });
 
@@ -252,7 +328,11 @@ function watch() {
   };
   fs.watch(store.DATA_DIR, (_ev, name) => name && name.startsWith('tasks.json') && ping('tasks:changed'));
   try {
-    fs.watch(sessions.LIVE_DIR, () => ping('sessions:changed'));
+    fs.watch(sessions.LIVE_DIR, () => {
+      ping('sessions:changed');
+      clearTimeout(timers.check);
+      timers.check = setTimeout(checkSessions, 300);
+    });
   } catch {
     /* no live sessions dir yet */
   }
@@ -281,6 +361,8 @@ app.whenReady().then(() => {
   introduceNotifications();
   pollPRs();
   setInterval(pollPRs, POLL_MS);
+  checkSessions(); // seed current statuses silently
+  setInterval(checkSessions, 5000);
   app.on('activate', showWindow);
   app.on('browser-window-focus', updateBadge);
 });

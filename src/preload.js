@@ -10,6 +10,8 @@ contextBridge.exposeInMainWorld('api', {
   sessionLink: invoke('sessions:link'),
   resume: invoke('session:resume'),
   resumeCommand: invoke('session:command'),
+  startSession: invoke('session:start'),
+  pickFolder: invoke('dialog:pickFolder'),
   copy: invoke('clipboard:write'),
   openFolder: invoke('open:folder'),
   openVSCode: invoke('open:vscode'),
@@ -20,11 +22,12 @@ contextBridge.exposeInMainWorld('api', {
   setNotificationsRead: invoke('notifications:setRead'),
   removeNotifications: invoke('notifications:remove'),
   clearReadNotifications: invoke('notifications:clearRead'),
+  clearAllNotifications: invoke('notifications:clearAll'),
   getSettings: invoke('settings:get'),
   setSettings: invoke('settings:set'),
   skillStatus: invoke('skill:status'),
   installSkill: invoke('skill:install'),
   on: (channel, fn) => {
-    if (['tasks:changed', 'sessions:changed', 'prs:updated', 'prs:focus', 'notifications:changed', 'notifications:focus'].includes(channel)) ipcRenderer.on(channel, (_e, payload) => fn(payload));
+    if (['tasks:changed', 'sessions:changed', 'prs:updated', 'prs:focus', 'notifications:changed', 'notifications:focus', 'settings:changed'].includes(channel)) ipcRenderer.on(channel, (_e, payload) => fn(payload));
   },
 });

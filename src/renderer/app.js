@@ -11,6 +11,7 @@ const state = {
   groupStacks: localStorage.getItem('groupStacks') !== '0',
   prFilter: localStorage.getItem('prFilter') || 'all', // all | ready | respond
   notifications: [],
+  settings: null, // from main: { notify: prefs, repos, openAtLogin, ... }
   notifFilter: localStorage.getItem('notifFilter') || 'all', // all | unread
   stackOpen: JSON.parse(localStorage.getItem('stackOpen') || '{}'), // root PR url -> expanded?
 };
@@ -233,7 +234,7 @@ function linkPRs(task, urls) {
 }
 
 // ---- rendering ------------------------------------------------------------
-const VIEW_TITLES = { reviews: 'Review requests', notifications: 'Notifications', open: 'Open', todo: 'To do', doing: 'In progress', done: 'Done', sessions: 'Claude sessions', prs: 'Pull requests' };
+const VIEW_TITLES = { settings: 'Settings', reviews: 'Review requests', notifications: 'Notifications', open: 'Open', todo: 'To do', doing: 'In progress', done: 'Done', sessions: 'Claude sessions', prs: 'Pull requests' };
 const STATUS_ORDER = { doing: 0, todo: 1, done: 2 };
 const PRIO_ORDER = { high: 0, normal: 1, low: 2 };
 
@@ -267,7 +268,7 @@ function render({ keepDetail } = {}) {
   c.reviews = state.prs ? state.prs.review.length : '';
   c.unread = state.notifications.filter((n) => !n.read).length || '';
   document.querySelectorAll('[data-count]').forEach((el) => (el.textContent = c[el.dataset.count] || ''));
-  document.querySelectorAll('#nav a').forEach((a) => a.classList.toggle('active', a.dataset.view === state.view));
+  document.querySelectorAll('aside [data-view]').forEach((a) => a.classList.toggle('active', a.dataset.view === state.view));
   renderListHead();
   renderList();
   if (!keepDetail) renderDetail();
@@ -293,6 +294,9 @@ function renderListHead() {
   const isNotif = state.view === 'notifications';
   const unread = state.notifications.filter((n) => !n.read).length;
   mb.hidden = !isNotif;
+  const cb = $('#clearAllBtn');
+  cb.hidden = !isNotif;
+  cb.disabled = !state.notifications.length;
   mb.disabled = !unread;
   nf.hidden = !isNotif;
   if (isNotif) {
@@ -388,6 +392,8 @@ function renderList() {
   const list = $('#list');
   list.replaceChildren();
 
+  if (state.view === 'settings') return settingsList(list);
+
   if (state.view === 'notifications') {
     const items = state.notifications
       .filter((n) => state.notifFilter === 'all' || !n.read)
@@ -417,10 +423,11 @@ function renderList() {
           cls: `notif ${n.read ? 'read' : 'unread'}`,
           selected: state.selected === n.id,
           onclick: () => openNotification(n),
-          lead: h('span', { class: `notif-icon ${n.kind}` }, n.kind === 'ready' ? '✓' : '💬'),
+          lead: h('span', { class: `notif-icon ${n.kind}` }, NOTIF_ICON[n.kind] || '•'),
           title: n.title,
           meta: [
             n.repo ? h('span', { class: 'mono' }, `${n.repo.split('/')[1]}#${n.number}`) : null,
+            n.kind === 'session' ? h('span', { class: 'mono' }, folder(n.cwd)) : null,
             h('span', { class: 'notif-body' }, n.body || ''),
             h('span', {}, timeLabel(n.createdAt)),
           ],
@@ -474,6 +481,7 @@ function renderList() {
         title: p.title,
         meta: [
           h('span', { class: 'mono' }, prLabel(p)),
+          state.view === 'reviews' || !isMine(p) ? h('span', { class: 'pill', title: 'Author' }, `@${p.author}`) : null,
           ...prStatusPills(p, { compact: true }),
           sess.length ? h('span', { class: 'pill claude' }, `◆ ${sess.length}`) : null,
           tasks ? h('span', { class: 'pill claude' }, `${tasks} task${tasks > 1 ? 's' : ''}`) : null,
@@ -647,6 +655,7 @@ function renderDetail() {
     const s = sessionById(state.selected);
     return pane.append(s ? sessionDetail(s) : emptyDetail('Pick a session to view its context or turn it into a task.'));
   }
+  if (state.view === 'settings') return pane.append(settingsDetail());
   if (state.view === 'notifications') {
     const n = state.notifications.find((x) => x.id === state.selected);
     return pane.append(n ? notificationDetail(n) : emptyDetail('Select a notification.'));
@@ -662,7 +671,7 @@ function renderDetail() {
 const emptyDetail = (msg) => h('div', { class: 'detail-empty' }, h('div', {}, msg));
 
 // ---- shared detail pieces --------------------------------------------------
-const terminal = () => $('#terminalSel').value;
+const terminal = () => localStorage.getItem('terminal') || 'terminal';
 
 async function resume(sessionId, cwd) {
   try {
@@ -817,6 +826,7 @@ function taskDetail(t) {
         ['high', 'High'],
       ]),
       h('div', { style: 'flex:1' }),
+      h('button', { class: 'btn primary', title: 'Start a new Claude Code session that takes a first pass at this task', onclick: () => openStartClaude(t) }, 'Start with Claude ✦'),
       h(
         'button',
         {
@@ -965,7 +975,105 @@ function showPRInBaton(url) {
   setTimeout(() => document.querySelector('#list .item.selected')?.scrollIntoView({ block: 'center' }), 50);
 }
 
+const NOTIF_ICON = { ready: '✓', comment: '💬', review: '👀', ci: '✗', session: '◆' };
+const NOTIF_LABEL = { ready: 'ready to merge', comment: 'comments', review: 'review request', ci: 'checks failing', session: 'Claude session' };
+
+function sessionNotificationDetail(n) {
+  const s = sessionById(n.sessionId);
+  return h(
+    'div',
+    {},
+    h('div', { class: 'title-input', style: 'border:none' }, n.title),
+    h(
+      'div',
+      { class: 'row', style: 'margin-top:8px' },
+      h('span', { class: 'pill claude' }, 'Claude session'),
+      h('span', { class: 'pill' }, `${dayLabel(n.createdAt)} · ${timeLabel(n.createdAt)}`),
+      n.ranFor ? h('span', { class: 'pill' }, `ran ${n.ranFor >= 90 ? `${Math.round(n.ranFor / 60)} min` : `${Math.round(n.ranFor)} s`}`) : null,
+      livePill(s?.live),
+    ),
+    h(
+      'div',
+      { class: 'row', style: 'margin-top:14px' },
+      h('button', { class: 'btn primary', onclick: () => resume(n.sessionId, (s && s.cwd) || n.cwd) }, '▶ Resume session'),
+      s
+        ? h(
+            'button',
+            {
+              class: 'btn',
+              onclick: () => {
+                state.view = 'sessions';
+                select(n.sessionId);
+              },
+            },
+            'Show session in Baton',
+          )
+        : null,
+      h('button', { class: 'btn', onclick: () => openNewTask({ sessionIds: [n.sessionId], title: (s && s.title) || '' }) }, '+ Create task'),
+      h('div', { style: 'flex:1' }),
+      notifActions(n),
+    ),
+    n.lastPrompt ? card('You asked', null, h('div', { class: 'summary' }, n.lastPrompt)) : null,
+    card('Claude said', null, s?.recent?.length ? conversation(s.recent.slice(-2)) : h('div', { class: 'summary' }, n.body)),
+  );
+}
+
+function notifActions(n) {
+  return [
+    h('button', { class: 'btn small ghost', onclick: () => api.setNotificationsRead({ ids: [n.id], read: !n.read }) }, n.read ? 'Mark unread' : 'Mark read'),
+    h(
+      'button',
+      {
+        class: 'btn small ghost danger',
+        onclick: async () => {
+          state.selected = null;
+          await api.removeNotifications([n.id]);
+        },
+      },
+      'Delete',
+    ),
+  ];
+}
+
+// "Don't tell me about this again" controls shown on PR notifications.
+function muteControls(n) {
+  if (!n.repo || !state.settings) return null;
+  const prefs = state.settings.notify;
+  const urls = n.prUrls || (n.url ? [n.url] : []);
+  const prMuted = urls.length && urls.every((u) => prefs.mutedPRs.includes(u));
+  const repoMuted = prefs.mutedRepos.includes(n.repo);
+  return h(
+    'div',
+    { class: 'row mute-row' },
+    h('span', { class: 'muted' }, 'Not interested?'),
+    urls.length ? h('button', { class: 'btn small', onclick: () => setMutedPRs(urls, !prMuted) }, prMuted ? `🔔 Unmute ${urls.length > 1 ? 'stack' : 'PR'}` : `🔕 Mute this ${urls.length > 1 ? 'stack' : 'PR'}`) : null,
+    h('button', { class: 'btn small', onclick: () => setMutedRepo(n.repo, !repoMuted) }, repoMuted ? `🔔 Unmute ${n.repo}` : `🔕 Mute ${n.repo}`),
+  );
+}
+
+async function setMutedPRs(urls, mute) {
+  const cur = new Set(state.settings.notify.mutedPRs);
+  urls.forEach((u) => (mute ? cur.add(u) : cur.delete(u)));
+  await saveNotifyPrefs({ mutedPRs: [...cur] });
+  toast(mute ? 'Muted. You won’t get notifications for it.' : 'Unmuted');
+}
+async function setMutedRepo(repo, mute) {
+  const cur = new Set(state.settings.notify.mutedRepos);
+  mute ? cur.add(repo) : cur.delete(repo);
+  await saveNotifyPrefs({ mutedRepos: [...cur] });
+  toast(mute ? `Muted ${repo}` : `Unmuted ${repo}`);
+}
+async function saveNotifyPrefs(patch) {
+  await api.setSettings({ notify: patch });
+  await loadSettings();
+  render({ keepDetail: isEditing() });
+}
+async function loadSettings() {
+  state.settings = await api.getSettings();
+}
+
 function notificationDetail(n) {
+  if (n.kind === 'session') return sessionNotificationDetail(n);
   const prUrls = n.stack ? n.stack.map((x) => x.url) : n.url ? [n.url] : [];
   const live = prByUrl(n.url);
   const refs = n.stack
@@ -982,7 +1090,8 @@ function notificationDetail(n) {
     h(
       'div',
       { class: 'row', style: 'margin-top:8px' },
-      h('span', { class: `pill ${n.kind === 'ready' ? 'ready' : 'claude'}` }, n.kind === 'ready' ? 'ready to merge' : 'comments'),
+      h('span', { class: `pill ${n.kind === 'ready' ? 'ready' : n.kind === 'ci' ? 'bad' : 'claude'}` }, NOTIF_LABEL[n.kind] || n.kind),
+      n.kind === 'review' && n.author ? h('span', { class: 'pill' }, `requested by @${n.author}`) : null,
       h('span', { class: 'pill' }, `${dayLabel(n.createdAt)} · ${timeLabel(n.createdAt)}`),
       n.read ? null : h('span', { class: 'pill wait' }, 'unread'),
       n.kind === 'ready' && live && !live.mergeReady ? h('span', { class: 'pill bad', title: 'Status changed since this notification' }, 'no longer ready') : null,
@@ -1031,6 +1140,7 @@ function notificationDetail(n) {
         'Delete',
       ),
     ),
+    muteControls(n),
     n.comments?.length
       ? card(
           `Comments (${n.comments.length})`,
@@ -1089,6 +1199,12 @@ function prDetail(p) {
       { class: 'row', style: 'margin-top:14px' },
       h('button', { class: 'btn primary', onclick: () => openNewTask({ prUrls: [p.url], sessionIds: sess.slice(0, 1).map((s) => s.id), title: p.title }) }, '+ Create task from this PR'),
       h('button', { class: 'btn', onclick: () => api.openUrl(p.url) }, 'Open on GitHub ↗'),
+      state.settings
+        ? (() => {
+            const muted = state.settings.notify.mutedPRs.includes(p.url);
+            return h('button', { class: 'btn ghost', title: 'Stop or resume notifications for this PR', onclick: () => setMutedPRs([p.url], !muted) }, muted ? '🔔 Unmute' : '🔕 Mute');
+          })()
+        : null,
       h(
         'button',
         {
@@ -1255,6 +1371,145 @@ async function pickPRs(task) {
   saveTask(linkPRs(kept, urls));
 }
 
+// ---- start a Claude session from a task ------------------------------------------------
+const START_MODES = [
+  ['plan', 'Plan first', 'Read-only: Claude investigates and proposes a plan, no edits'],
+  ['default', 'Work on it, ask before changes', 'Normal Claude Code permissions'],
+  ['acceptEdits', 'Work on it, auto-accept edits', 'Claude edits files without asking (still asks for other commands)'],
+];
+
+function recentFolders() {
+  const out = [];
+  for (const s of state.sessions) if (s.cwd && !out.includes(s.cwd)) out.push(s.cwd);
+  return out.slice(0, 15);
+}
+
+function buildPrompt(t, what, mode, withContext) {
+  const lines = [`# Task: ${t.title}`, '', what.trim() || '(no further description)'];
+  if (withContext) {
+    const ctx = [];
+    if (t.summary) ctx.push(`Handoff notes from an earlier session:\n${t.summary}`);
+    if (t.notes && t.notes.trim() && t.notes.trim() !== what.trim()) ctx.push(`My notes:\n${t.notes.trim()}`);
+    if (t.prs.length) ctx.push(`Related pull requests (use \`gh pr view <url>\` for details):\n${t.prs.map((p) => `- ${p.url}${p.title ? ` — ${p.title}` : ''}`).join('\n')}`);
+    if (t.sessions.length)
+      ctx.push(
+        `Earlier Claude sessions on this:\n${t.sessions
+          .map((s) => `- ${s.title || s.id}${s.context?.lastPrompt ? ` (last ask: ${s.context.lastPrompt.slice(0, 200)})` : ''}`)
+          .join('\n')}`,
+      );
+    if (ctx.length) lines.push('', '## Context', '', ctx.join('\n\n'));
+  }
+  lines.push(
+    '',
+    '## How to approach this',
+    '',
+    mode === 'plan'
+      ? 'Take a first pass: investigate the relevant code and propose a concrete plan. Do not change files yet.'
+      : 'Take a first pass: investigate the relevant code, then make a reasonable first implementation. Keep changes focused and do not commit or push unless I ask.',
+    'When you stop, summarize what you found or did, what is left, and any questions for me.',
+  );
+  return lines.join('\n');
+}
+
+function openStartClaude(t) {
+  const dlg = $('#startDlg');
+  const folders = recentFolders();
+  const linkedCwd = t.sessions.map((s) => s.cwd).find(Boolean);
+  let cwd = linkedCwd || folders[0] || '';
+  let mode = localStorage.getItem('startMode') || 'plan';
+
+  const folderSel = h('select', {});
+  const drawFolders = () => {
+    const opts = [...new Set([cwd, ...folders].filter(Boolean))];
+    folderSel.replaceChildren(...opts.map((f) => h('option', { value: f, selected: f === cwd ? true : null }, home(f))), h('option', { value: '__pick' }, 'Choose another folder…'));
+  };
+  folderSel.addEventListener('change', async () => {
+    if (folderSel.value === '__pick') {
+      const picked = await api.pickFolder(cwd);
+      if (picked) cwd = picked;
+    } else cwd = folderSel.value;
+    drawFolders();
+  });
+  drawFolders();
+
+  const what = h('textarea', { rows: 6, placeholder: 'What needs to be done? Goals, constraints, where to look, what “done” means…', value: t.notes || '' });
+  const withCtx = h('input', { type: 'checkbox', checked: true });
+  const ctxBits = [t.summary && 'handoff notes', t.prs.length && `${t.prs.length} PR${t.prs.length > 1 ? 's' : ''}`, t.sessions.length && `${t.sessions.length} earlier session${t.sessions.length > 1 ? 's' : ''}`].filter(Boolean);
+  const preview = h('pre', { class: 'prompt-preview' });
+  const modeBox = h('div', { class: 'modes' });
+  const drawModes = () =>
+    modeBox.replaceChildren(
+      ...START_MODES.map(([v, label, hint]) =>
+        h(
+          'label',
+          { class: `mode ${mode === v ? 'on' : ''}` },
+          h('input', {
+            type: 'radio',
+            name: 'startMode',
+            checked: mode === v ? true : null,
+            onchange: () => {
+              mode = v;
+              drawModes();
+              drawPreview();
+            },
+          }),
+          h('span', {}, h('span', { class: 'toggle-label' }, label), h('span', { class: 'toggle-hint' }, hint)),
+        ),
+      ),
+    );
+  const drawPreview = () => (preview.textContent = buildPrompt(t, what.value, mode, withCtx.checked));
+  what.addEventListener('input', drawPreview);
+  withCtx.addEventListener('change', drawPreview);
+  drawModes();
+  drawPreview();
+
+  const start = async () => {
+    try {
+      const prompt = buildPrompt(t, what.value, mode, withCtx.checked);
+      localStorage.setItem('startMode', mode);
+      const r = await api.startSession({ cwd, prompt, name: t.title, mode, terminal: terminal() });
+      dlg.close();
+      // Link the new session right away; its transcript appears once Claude starts writing.
+      const fresh = state.tasks.find((x) => x.id === t.id) || t;
+      await saveTask({
+        ...fresh,
+        status: fresh.status === 'todo' ? 'doing' : fresh.status,
+        notes: fresh.notes || what.value,
+        sessions: [...fresh.sessions, { id: r.sessionId, cwd: r.cwd, title: t.title, gitBranch: '', context: null }],
+      });
+      toast('Claude is starting in your terminal');
+    } catch (e) {
+      toast(`Couldn’t start Claude: ${e.message}`);
+    }
+  };
+
+  dlg.replaceChildren(
+    h(
+      'div',
+      { class: 'pick start' },
+      h('h2', {}, 'Start with Claude'),
+      h('div', { class: 'muted', style: 'margin-bottom:6px' }, `Opens a new Claude Code session in ${terminal() === 'iterm' ? 'iTerm' : 'Terminal'}, linked to “${t.title}”.`),
+      h('label', { class: 'field-label' }, 'Project folder'),
+      folderSel,
+      h('label', { class: 'field-label' }, 'What needs to be done'),
+      what,
+      h('label', { class: 'field-label' }, 'Mode'),
+      modeBox,
+      ctxBits.length ? h('label', { class: 'toggle', style: 'margin-top:12px' }, withCtx, `Include context from this task (${ctxBits.join(', ')})`) : null,
+      h('details', { class: 'ctx' }, h('summary', {}, 'Preview prompt'), preview),
+      h(
+        'div',
+        { class: 'dlg-actions' },
+        h('button', { class: 'btn', onclick: () => dlg.close() }, 'Cancel'),
+        h('button', { class: 'btn primary', onclick: start }, 'Start Claude ✦'),
+      ),
+    ),
+  );
+  if (!state.sessions.length) loadSessions().then(drawFolders);
+  dlg.showModal();
+  what.focus();
+}
+
 // ---- new task dialog -----------------------------------------------------------
 const draft = { sessionIds: [], prUrls: [] };
 
@@ -1311,7 +1566,8 @@ $('#addPRsBtn').addEventListener('click', async () => {
 });
 
 $('#newTaskForm').addEventListener('submit', async (e) => {
-  if (e.submitter?.value !== 'ok') return;
+  const action = e.submitter?.value;
+  if (action !== 'ok' && action !== 'start') return;
   const form = e.target;
   let task = { title: form.title.value.trim(), notes: form.notes.value, sessions: [], prs: [] };
   task = await linkSessions(task, draft.sessionIds);
@@ -1319,6 +1575,7 @@ $('#newTaskForm').addEventListener('submit', async (e) => {
   const saved = await saveTask(task);
   if (!['open', 'todo'].includes(state.view)) state.view = 'open';
   select(saved.id);
+  if (action === 'start') openStartClaude(saved);
 });
 $('#cancelNew').addEventListener('click', () => $('#newTaskDlg').close());
 
@@ -1326,6 +1583,7 @@ $('#cancelNew').addEventListener('click', () => $('#newTaskDlg').close());
 async function renderSkillBox() {
   const st = await api.skillStatus();
   const box = $('#skillBox');
+  if (!box) return;
   if (st.installed && st.current) {
     box.replaceChildren(h('div', {}, h('b', {}, '/task'), ' is installed. Inside any Claude Code session, run ', h('code', {}, '/task'), ' to park pending work here with the agent’s handoff notes.'));
     return;
@@ -1349,7 +1607,7 @@ async function renderSkillBox() {
 }
 
 // ---- wiring -------------------------------------------------------------------
-document.querySelectorAll('#nav a').forEach((a) =>
+document.querySelectorAll('aside [data-view]').forEach((a) =>
   a.addEventListener('click', async () => {
     state.view = a.dataset.view;
     state.selected = null;
@@ -1373,8 +1631,6 @@ $('#search').addEventListener('input', (e) => {
   renderList();
 });
 $('#newTaskBtn').addEventListener('click', () => openNewTask());
-$('#terminalSel').value = localStorage.getItem('terminal') || 'terminal';
-$('#terminalSel').addEventListener('change', (e) => localStorage.setItem('terminal', e.target.value));
 document.addEventListener('keydown', (e) => {
   if (e.metaKey && e.key === 'n') {
     e.preventDefault();
@@ -1427,6 +1683,16 @@ api.on('notifications:focus', async (id) => {
   setTimeout(() => document.querySelector('#list .item.selected')?.scrollIntoView({ block: 'center' }), 50);
 });
 $('#markAllBtn').addEventListener('click', () => api.setNotificationsRead({ ids: 'all', read: true }));
+$('#clearAllBtn').addEventListener('click', async () => {
+  if (!confirm(`Delete all ${state.notifications.length} notifications? This can’t be undone.`)) return;
+  state.selected = null;
+  await api.clearAllNotifications();
+  toast('Notifications cleared');
+});
+api.on('settings:changed', async () => {
+  await loadSettings();
+  if (state.view === 'settings') renderDetail();
+});
 api.on('prs:focus', (url) => {
   state.view = viewForPR(url);
   state.search = '';
@@ -1436,34 +1702,173 @@ api.on('prs:focus', (url) => {
   setTimeout(() => document.querySelector('#list .item.selected')?.scrollIntoView({ block: 'center' }), 50);
 });
 
-async function renderSettings() {
-  const st = await api.getSettings();
-  const toggle = (key, label, title) =>
+// ---- Settings view ------------------------------------------------------------------
+const SETTINGS_SECTIONS = [
+  ['set-notify', 'Notifications', 'What Baton tells you about'],
+  ['set-muted', 'Muted', 'Repos and PRs you don’t want to hear about'],
+  ['set-general', 'General', 'Resume, startup'],
+  ['set-claude', 'Claude Code', 'The /task skill'],
+];
+
+function settingsList(list) {
+  for (const [id, title, sub] of SETTINGS_SECTIONS) {
+    list.append(
+      listItem({
+        onclick: () => document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' }),
+        title,
+        meta: [h('span', {}, sub)],
+      }),
+    );
+  }
+}
+
+function settingsDetail() {
+  const st = state.settings;
+  if (!st) return emptyDetail('Loading…');
+  const n = st.notify;
+  const check = (key, label, hint) =>
     h(
       'label',
-      { class: 'toggle', title },
-      h('input', {
-        type: 'checkbox',
-        checked: st[key] ? true : null,
-        onchange: async (e) => {
-          await api.setSettings({ [key]: e.target.checked });
-          renderSettings();
-        },
-      }),
-      label,
+      { class: 'toggle row-toggle' },
+      h('input', { type: 'checkbox', checked: n[key] ? true : null, onchange: (e) => saveNotifyPrefs({ [key]: e.target.checked }) }),
+      h('span', {}, h('span', { class: 'toggle-label' }, label), hint ? h('span', { class: 'toggle-hint' }, hint) : null),
     );
-  $('#settingsBox').replaceChildren(
-    h('div', { class: 'field-label', style: 'margin-top:0' }, 'Notify me when'),
-    toggle('notifyReady', 'A PR or stack is ready to merge'),
-    toggle('notifyComments', 'Someone comments on my PRs'),
-    ...(st.canLaunchAtLogin ? [toggle('openAtLogin', 'Run at login (background)', 'Keeps the PR watcher running after restarts')] : []),
+  const group = (title, ...rows) => h('div', { class: 'set-group' }, h('div', { class: 'field-label' }, title), ...rows);
+  const secs = [
+    [0, 'Any length'],
+    [30, '30 seconds'],
+    [60, '1 minute'],
+    [120, '2 minutes'],
+    [300, '5 minutes'],
+  ];
+
+  const muted = n.mutedPRs.map((url) => {
+    const p = prByUrl(url);
+    const m = /github\.com\/([^/]+\/[^/]+)\/pull\/(\d+)/.exec(url) || [];
+    return h(
+      'div',
+      { class: 'sess-row' },
+      h('div', { class: 'grow' }, h('div', { class: 't' }, p ? p.title : url), h('div', { class: 'm' }, h('span', { class: 'mono' }, `${m[1] || ''}#${m[2] || ''}`))),
+      h('button', { class: 'btn small', onclick: () => setMutedPRs([url], false) }, '🔔 Unmute'),
+    );
+  });
+
+  const skillBox = h('div', { id: 'skillBox', class: 'skill-box' });
+  setTimeout(renderSkillBox, 0);
+
+  return h(
+    'div',
+    { class: 'settings' },
+    h('div', { class: 'title-input', style: 'border:none' }, 'Settings'),
+
+    h(
+      'div',
+      { class: 'card', id: 'set-notify' },
+      h('h3', {}, 'Notifications'),
+      h('div', { class: 'muted', style: 'margin:-4px 0 10px' }, 'Only the types you leave on are recorded in Notifications and shown as banners.'),
+      group(
+        'Pull requests',
+        check('readyPR', 'A PR becomes ready to merge', 'Standalone PRs: approved, checks green, no conflicts or open threads'),
+        check('readyStack', 'A whole stack becomes ready to merge', 'One notification when every PR in the stack is ready'),
+        check('ciFailed', 'Checks start failing on my PRs'),
+        check('reviewRequested', 'Someone requests my review', 'Includes who asked'),
+      ),
+      group(
+        'Comments on my PRs',
+        check('comments', 'Comments from people'),
+        check('botComments', 'Comments from bots and AI reviewers', 'e.g. *-review-agent, [bot] accounts'),
+        check('approvals', 'Approvals'),
+        check('changesRequested', 'Changes requested'),
+      ),
+      group(
+        'Claude Code',
+        check('sessionDone', 'A Claude session finishes', 'When a running session goes back to waiting for you'),
+        h(
+          'label',
+          { class: 'toggle row-toggle', style: n.sessionDone ? '' : 'opacity:.5' },
+          h('span', { class: 'toggle-label', style: 'margin-left:24px' }, 'Only if it ran at least'),
+          h(
+            'select',
+            { class: 'inline-select', disabled: n.sessionDone ? null : true, onchange: (e) => saveNotifyPrefs({ sessionMinSeconds: Number(e.target.value) }) },
+            secs.map(([v, label]) => h('option', { value: v, selected: n.sessionMinSeconds === v ? true : null }, label)),
+          ),
+        ),
+      ),
+      group(
+        'Delivery',
+        check('banners', 'Show macOS banners', 'Off = record quietly in Notifications only'),
+        check('dockBadge', 'Unread count on the Dock icon'),
+      ),
+    ),
+
+    h(
+      'div',
+      { class: 'card', id: 'set-muted' },
+      h('h3', {}, 'Muted'),
+      group(
+        'Repositories',
+        st.repos.length
+          ? st.repos.map((repo) =>
+              h(
+                'label',
+                { class: 'toggle row-toggle' },
+                h('input', { type: 'checkbox', checked: n.mutedRepos.includes(repo) ? null : true, onchange: (e) => setMutedRepo(repo, !e.target.checked) }),
+                h('span', { class: 'toggle-label mono' }, repo),
+              ),
+            )
+          : h('div', { class: 'muted' }, 'No repositories yet.'),
+      ),
+      group('Pull requests and stacks', muted.length ? muted : h('div', { class: 'muted' }, 'None. Use “Mute” on a PR or notification to stop hearing about it.')),
+    ),
+
+    h(
+      'div',
+      { class: 'card', id: 'set-general' },
+      h('h3', {}, 'General'),
+      h(
+        'label',
+        { class: 'toggle row-toggle' },
+        h('span', { class: 'toggle-label' }, 'Resume Claude sessions in'),
+        h(
+          'select',
+          {
+            class: 'inline-select',
+            onchange: (e) => {
+              localStorage.setItem('terminal', e.target.value);
+              toast('Saved');
+            },
+          },
+          [
+            ['terminal', 'Terminal'],
+            ['iterm', 'iTerm'],
+          ].map(([v, label]) => h('option', { value: v, selected: terminal() === v ? true : null }, label)),
+        ),
+      ),
+      st.canLaunchAtLogin
+        ? h(
+            'label',
+            { class: 'toggle row-toggle' },
+            h('input', {
+              type: 'checkbox',
+              checked: st.openAtLogin ? true : null,
+              onchange: async (e) => {
+                await api.setSettings({ openAtLogin: e.target.checked });
+                await loadSettings();
+                renderDetail();
+              },
+            }),
+            h('span', {}, h('span', { class: 'toggle-label' }, 'Run at login'), h('span', { class: 'toggle-hint' }, 'Keeps the GitHub and session watchers running in the background')),
+          )
+        : null,
+    ),
+
+    h('div', { class: 'card', id: 'set-claude' }, h('h3', {}, 'Claude Code'), skillBox),
   );
 }
 
 (async () => {
   const [, , cached] = await Promise.all([loadTasks(), loadSessions(), api.cachedPRs(), loadNotifications()]);
   state.prs = cached;
+  await loadSettings();
   render();
-  renderSkillBox();
-  renderSettings();
 })();
