@@ -135,6 +135,20 @@ function updateBadge() {
   if (app.dock) app.dock.setBadge(n ? String(n > 99 ? '99+' : n) : '');
 }
 
+// macOS only shows Dock badges and banners for apps that have asked for notification
+// permission, and Electron asks on the first notification. Send one on first run so the
+// permission prompt (and the Dock badge) don't wait for the first GitHub event.
+function introduceNotifications() {
+  const s = readJSON(SETTINGS, {});
+  if (!app.isPackaged || s.notificationsIntroduced || !Notification.isSupported()) return;
+  const n = notifications.unreadCount();
+  new Notification({
+    title: 'Baton notifications are on',
+    body: n ? `You have ${n} unread. Baton will tell you when PRs are ready to merge or get comments.` : 'Baton will tell you when PRs are ready to merge or get comments.',
+  }).show();
+  writeJSON(SETTINGS, { ...s, notificationsIntroduced: true });
+}
+
 function notificationsChanged() {
   updateBadge();
   send('notifications:changed');
@@ -186,6 +200,7 @@ async function pollPRs() {
       prError = e.message;
     } finally {
       prInflight = null;
+      updateBadge(); // re-apply in case notification permission was granted since the last check
       send('prs:updated', { data: prData, error: prError });
     }
   })();
@@ -263,9 +278,11 @@ app.whenReady().then(() => {
   if (!atLogin) createWindow();
   watch();
   updateBadge();
+  introduceNotifications();
   pollPRs();
   setInterval(pollPRs, POLL_MS);
   app.on('activate', showWindow);
+  app.on('browser-window-focus', updateBadge);
 });
 // Keep running in the background (Dock icon stays) so the PR watcher can notify you.
 app.on('window-all-closed', () => {});
