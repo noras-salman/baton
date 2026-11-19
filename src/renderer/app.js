@@ -12,6 +12,8 @@ const state = {
   prFilter: localStorage.getItem('prFilter') || 'all', // all | ready | respond
   notifications: [],
   settings: null, // from main: { notify: prefs, repos, openAtLogin, ... }
+  convo: {}, // PR url -> { loading, data, error, filter }
+  jobs: {}, // sessionId -> { startedAt, message } while Claude works on a message from Baton
   notifFilter: localStorage.getItem('notifFilter') || 'all', // all | unread
   stackOpen: JSON.parse(localStorage.getItem('stackOpen') || '{}'), // root PR url -> expanded?
 };
@@ -758,6 +760,7 @@ function sessionRow(link, { onUnlink, showContext } = {}) {
       ),
     ),
     h('button', { class: 'btn small primary', title: `Open in ${openInLabel()}`, onclick: () => resume(link.id, cwd) }, terminal() === 'vscode' ? '▶ Open' : '▶ Resume'),
+    s ? h('button', { class: 'btn small', title: 'Send Claude a message in this session', onclick: () => openMessageDialog(link.id) }, state.jobs[link.id] ? '⏳' : '💬') : null,
     h('button', { class: 'btn small', title: 'Copy resume command', onclick: () => copyResume(link.id, cwd) }, 'Copy cmd'),
     onUnlink ? h('button', { class: 'btn small ghost', onclick: onUnlink }, 'Unlink') : null,
   );
@@ -960,6 +963,7 @@ function sessionDetail(s) {
     ),
     prs.length ? card(`Pull requests (${prs.length})`, null, prs.map((p) => prRow(taskPR(p)))) : null,
     linkedTasksCard(state.tasks.filter((t) => t.sessions.some((x) => x.id === s.id))),
+    messageBox(s.id),
     card('Recent conversation', null, conversation(s.recent)),
   );
 }
@@ -1039,6 +1043,7 @@ function sessionNotificationDetail(n) {
     n.kind === 'attention'
       ? card({ permission: 'Waiting for your permission', question: 'Claude is asking', plan: 'Plan waiting for approval', input: 'Claude needs input' }[n.reason] || 'Waiting on you', null, h('div', { class: 'summary' }, n.body))
       : null,
+    messageBox(n.sessionId),
     n.lastPrompt ? card('You asked', null, h('div', { class: 'summary' }, n.lastPrompt)) : null,
     n.kind === 'attention'
       ? s?.recent?.length
@@ -1201,6 +1206,166 @@ function notificationDetail(n) {
       return sess.length ? card(`Claude sessions (${sess.length})`, null, sess.map((x) => sessionRow({ id: x.id, cwd: x.cwd, title: x.title, gitBranch: x.gitBranch }))) : null;
     })(),
   );
+}
+
+// ---- PR conversation (comment history) -------------------------------------------------
+function ensureConvo(url, force) {
+  const c = state.convo[url];
+  if (c && (c.loading || (!force && c.data && Date.now() - new Date(c.data.fetchedAt) < 2 * 60 * 1000))) return;
+  state.convo[url] = { ...(c || {}), loading: true, error: '' };
+  api.prConversation(url).then((r) => {
+    state.convo[url] = { ...state.convo[url], loading: false, data: r.ok ? r.data : state.convo[url].data, error: r.ok ? '' : r.error };
+    if (state.selected === url && isPRView()) renderDetail();
+  });
+}
+
+const REVIEW_VERB = { APPROVED: 'approved', CHANGES_REQUESTED: 'requested changes', COMMENTED: 'reviewed', DISMISSED: 'review dismissed' };
+
+function commentBody(text) {
+  if (!text) return null;
+  const body = h('div', { class: 'cbody' }, text);
+  if (text.split('\n').length <= 8 && text.length <= 700) return body;
+  body.classList.add('clamped');
+  return [
+    body,
+    h(
+      'button',
+      {
+        class: 'link-btn',
+        onclick: (e) => {
+          const open = body.classList.toggle('clamped');
+          e.target.textContent = open ? 'Show more' : 'Show less';
+        },
+      },
+      'Show more',
+    ),
+  ];
+}
+
+function cHead(c, verb) {
+  return h(
+    'div',
+    { class: 'comment-head' },
+    h('b', {}, `@${c.login || c.author}`),
+    c.bot ? h('span', { class: 'pill', style: 'margin-left:6px' }, 'bot') : null,
+    h('span', { class: 'muted' }, ` ${verb} · ${ago(c.at)}`),
+    h('div', { style: 'flex:1' }),
+    c.url ? openButton(c.url) : null,
+  );
+}
+
+function conversationCard(p) {
+  ensureConvo(p.url);
+  const c = state.convo[p.url] || {};
+  const d = c.data;
+  const filter = c.filter || 'all';
+  const setFilter = (f) => {
+    state.convo[p.url] = { ...c, filter: f };
+    renderDetail();
+  };
+  if (!d) return card('Conversation', null, h('div', { class: 'muted' }, c.error ? `Couldn’t load: ${c.error}` : 'Loading comments…'));
+
+  const unresolved = d.threads.filter((t) => !t.resolved);
+  const items = [];
+  if (filter === 'all' && d.description.body) items.push({ at: d.description.at, node: h('div', { class: 'comment' }, cHead({ login: d.description.author, at: d.description.at }, 'opened this PR'), commentBody(d.description.body)) });
+  if (filter !== 'reviews')
+    for (const t of filter === 'unresolved' ? unresolved : d.threads) {
+      items.push({
+        at: t.comments[0]?.at || '',
+        node: h(
+          'div',
+          { class: `thread ${t.resolved ? 'resolved' : ''}` },
+          h(
+            'div',
+            { class: 'thread-head' },
+            h('span', { class: 'mono' }, `${t.path}${t.line ? `:${t.line}` : ''}`),
+            t.resolved ? h('span', { class: 'pill ok' }, 'resolved') : h('span', { class: 'pill wait' }, 'unresolved'),
+            t.outdated ? h('span', { class: 'pill' }, 'outdated') : null,
+          ),
+          t.comments.map((x, i) => h('div', { class: 'comment' }, cHead(x, i ? 'replied' : 'commented'), commentBody(x.body))),
+        ),
+      });
+    }
+  if (filter !== 'unresolved') for (const r of d.reviews) items.push({ at: r.at, node: h('div', { class: `comment review ${r.state.toLowerCase()}` }, cHead(r, REVIEW_VERB[r.state] || 'reviewed'), commentBody(r.body)) });
+  if (filter === 'all') for (const x of d.comments) items.push({ at: x.at, node: h('div', { class: 'comment' }, cHead(x, 'commented'), commentBody(x.body)) });
+  items.sort((a, b) => String(a.at).localeCompare(String(b.at)));
+
+  const tab = (v, label, n) => h('button', { class: filter === v ? 'on' : '', onclick: () => setFilter(v) }, label, n !== undefined ? h('span', { class: `tab-badge ${n ? (v === 'unresolved' ? 'red' : 'accent') : 'zero'}` }, n) : null);
+  return card(
+    'Conversation',
+    [h('button', { class: 'btn small ghost', title: 'Reload comments', onclick: () => ensureConvo(p.url, true) }, c.loading ? 'Loading…' : '↻')],
+    h('div', { class: 'seg filters', style: 'margin-bottom:10px' }, tab('all', 'All'), tab('unresolved', 'Unresolved', unresolved.length), tab('reviews', 'Reviews', d.reviews.length)),
+    items.length ? items.map((i) => i.node) : h('div', { class: 'muted' }, filter === 'unresolved' ? 'No unresolved threads.' : 'No comments yet.'),
+  );
+}
+
+// ---- message Claude --------------------------------------------------------------------
+async function loadJobs() {
+  state.jobs = await api.claudeJobs();
+}
+
+function messageBox(sessionId) {
+  const s = sessionById(sessionId);
+  const job = state.jobs[sessionId];
+  if (!s) return null;
+  if (job)
+    return card(
+      'Message Claude',
+      null,
+      h('div', { class: 'job' }, h('span', { class: 'spinner' }), h('span', {}, `Claude is working on your message (started ${ago(job.startedAt)}). You’ll get a notification with the reply.`)),
+      h('div', { class: 'summary muted', style: 'margin-top:6px' }, `“${job.message}”`),
+    );
+  const live = s.live;
+  if (live && live.entrypoint !== 'claude-vscode')
+    return card('Message Claude', null, h('div', { class: 'muted' }, 'This session is open in a terminal. Answer it there; Baton can only message sessions that are closed or open in VS Code.'));
+
+  const text = h('textarea', { rows: 3, placeholder: live ? 'Message for the session open in VS Code…' : 'Message Claude… (⌘↩ to send)' });
+  const mode = h(
+    'select',
+    { class: 'inline-select' },
+    [
+      ['auto', 'Auto mode'],
+      ['acceptEdits', 'Accept edits'],
+      ['plan', 'Plan (read-only)'],
+    ].map(([v, l]) => h('option', { value: v, selected: (localStorage.getItem('msgMode') || 'auto') === v ? true : null }, l)),
+  );
+  const sendIt = async () => {
+    if (!text.value.trim()) return;
+    try {
+      localStorage.setItem('msgMode', mode.value);
+      const r = await api.sendToClaude({ sessionId, message: text.value, mode: mode.value });
+      text.value = '';
+      toast(r.via === 'vscode' ? 'Opened in VS Code with your message. Press Enter there if it isn’t sent.' : 'Sent. Claude is working on it in the background.');
+      await loadJobs();
+      renderDetail();
+    } catch (e) {
+      toast(e.message.replace(/^Error invoking remote method '[^']+': (Error: )?/, ''));
+    }
+  };
+  text.addEventListener('keydown', (e) => {
+    if (e.metaKey && e.key === 'Enter') sendIt();
+  });
+  return card(
+    'Message Claude',
+    null,
+    text,
+    h(
+      'div',
+      { class: 'row', style: 'margin-top:8px' },
+      h('span', { class: 'toggle-hint' }, live ? 'Opens this session in VS Code with your message.' : 'Claude continues this session in the background; the reply lands in the session and you get a notification.'),
+      h('div', { style: 'flex:1' }),
+      live ? null : mode,
+      h('button', { class: 'btn primary', onclick: sendIt }, 'Send'),
+    ),
+  );
+}
+
+function openMessageDialog(sessionId) {
+  const dlg = $('#mergeDlg');
+  const box = messageBox(sessionId);
+  dlg.replaceChildren(h('div', { class: 'pick' }, h('h2', {}, sessionById(sessionId)?.title || 'Claude session'), box || h('div', { class: 'muted' }, 'Session not found.'), h('div', { class: 'dlg-actions' }, h('button', { class: 'btn', onclick: () => dlg.close() }, 'Close'))));
+  dlg.showModal();
+  dlg.querySelector('textarea')?.focus();
 }
 
 // ---- merging ------------------------------------------------------------------
@@ -1479,6 +1644,7 @@ function prDetail(p) {
         )
       : null,
     linkedTasksCard(state.tasks.filter((t) => t.prs.some((x) => x.url === p.url))),
+    conversationCard(p),
     h(
       'div',
       { class: 'foot-meta' },
@@ -1979,6 +2145,10 @@ window.addEventListener('focus', async () => {
 });
 // The main process polls GitHub in the background and pushes results here.
 api.on('prs:updated', (r) => applyPRUpdate(r));
+api.on('claude:jobs', async () => {
+  await loadJobs();
+  render({ keepDetail: isEditing() });
+});
 api.on('notifications:changed', async () => {
   await loadNotifications();
   render({ keepDetail: isEditing() });
@@ -2251,6 +2421,6 @@ function settingsDetail() {
 (async () => {
   const [, , cached] = await Promise.all([loadTasks(), loadSessions(), api.cachedPRs(), loadNotifications()]);
   state.prs = cached;
-  await loadSettings();
+  await Promise.all([loadSettings(), loadJobs()]);
   render();
 })();

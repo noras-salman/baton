@@ -56,7 +56,7 @@ const asq = (s) => `"${String(s).replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
 
 function resumeCommand(sessionId, cwd) {
   if (!/^[0-9a-f-]{36}$/i.test(sessionId)) throw new Error('Invalid session id');
-  return `${CLEAN_ENV} cd ${shq(cwd || require('os').homedir())} && claude --resume ${sessionId}`;
+  return `cd ${shq(cwd || require('os').homedir())} && claude --resume ${sessionId}`;
 }
 
 function osascript(script) {
@@ -75,6 +75,7 @@ function openInVSCode(folder, link) {
 }
 
 async function openInTerminal(cmd, terminal) {
+  if (!cmd.startsWith(CLEAN_ENV)) cmd = `${CLEAN_ENV} ${cmd}`;
   if (terminal === 'iterm') {
     await osascript(`tell application "iTerm"
   activate
@@ -365,6 +366,83 @@ async function pollPRs() {
 }
 
 ipcMain.handle('github:cached', () => prData);
+ipcMain.handle('github:conversation', async (_e, url) => {
+  try {
+    return { ok: true, data: await github.fetchPRConversation(url) };
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+});
+
+// ---- Message Claude from Baton ----------------------------------------------------
+// Sessions that aren't open anywhere are continued headlessly (`claude -p --resume`), which
+// appends to the same session. Sessions open in VS Code get the message through the
+// extension's link instead, so two processes never drive one session.
+const { spawn } = require('child_process');
+const claudeJobs = new Map(); // sessionId -> { startedAt, message }
+
+function claudeBin() {
+  const home = require('os').homedir();
+  for (const p of [path.join(home, '.local/bin/claude'), '/opt/homebrew/bin/claude', '/usr/local/bin/claude', path.join(home, '.claude/local/claude')]) {
+    if (fs.existsSync(p)) return p;
+  }
+  return 'claude';
+}
+
+ipcMain.handle('claude:jobs', () => Object.fromEntries(claudeJobs));
+ipcMain.handle('claude:send', async (_e, { sessionId, message, mode }) => {
+  if (!/^[0-9a-f-]{36}$/i.test(sessionId)) throw new Error('Invalid session id');
+  if (!message || !message.trim()) throw new Error('Empty message');
+  const s = sessions.getSession(sessionId);
+  if (!s) throw new Error('Session transcript not found');
+  const live = s.live;
+  if (live && live.entrypoint === 'claude-vscode') {
+    await openInVSCode(s.cwd, `vscode://anthropic.claude-code/open?session=${sessionId}&prompt=${encodeURIComponent(message)}`);
+    return { via: 'vscode' };
+  }
+  if (live) throw new Error('This session is open in a terminal. Answer it there; Baton can only message sessions that are closed or open in VS Code.');
+  if (claudeJobs.has(sessionId)) throw new Error('Claude is still working on your last message to this session.');
+
+  const args = ['-p', message, '--resume', sessionId, '--output-format', 'json'];
+  if (['plan', 'acceptEdits', 'auto'].includes(mode)) args.push('--permission-mode', mode);
+  const child = spawn(claudeBin(), args, { cwd: s.cwd || require('os').homedir(), env: process.env, stdio: ['ignore', 'pipe', 'pipe'] });
+  claudeJobs.set(sessionId, { startedAt: new Date().toISOString(), message: message.slice(0, 300) });
+  send('claude:jobs');
+  let out = '';
+  let err = '';
+  child.stdout.on('data', (d) => (out += d));
+  child.stderr.on('data', (d) => (err += d));
+  const finish = (code) => {
+    claudeJobs.delete(sessionId);
+    let result = null;
+    try {
+      result = JSON.parse(out.trim().split('\n').pop());
+    } catch {
+      /* not JSON */
+    }
+    const ok = code === 0 && result && !result.is_error;
+    const text = ok ? String(result.result || '') : (result && result.result) || err.trim() || `claude exited with code ${code}`;
+    deliver([
+      {
+        kind: 'session',
+        sessionId,
+        cwd: s.cwd,
+        gitBranch: s.gitBranch || '',
+        title: ok ? `Claude replied: ${s.title}` : `Claude couldn’t finish: ${s.title}`,
+        body: snip(text),
+        lastPrompt: snip(message),
+      },
+    ]);
+    send('claude:jobs');
+    send('sessions:changed');
+  };
+  child.on('error', (e) => {
+    err += e.message;
+    finish(-1);
+  });
+  child.on('close', finish);
+  return { via: 'background' };
+});
 ipcMain.handle('github:merge', async (_e, opts) => {
   try {
     const out = await github.mergePR(opts.url, opts);

@@ -19,6 +19,9 @@ contextBridge.exposeInMainWorld('api', {
   cachedPRs: invoke('github:cached'),
   refreshPRs: invoke('github:refresh'),
   mergePR: invoke('github:merge'),
+  prConversation: invoke('github:conversation'),
+  sendToClaude: invoke('claude:send'),
+  claudeJobs: invoke('claude:jobs'),
   disableAutoMerge: invoke('github:disableAutoMerge'),
   listNotifications: invoke('notifications:list'),
   setNotificationsRead: invoke('notifications:setRead'),
@@ -33,6 +36,6 @@ contextBridge.exposeInMainWorld('api', {
   skillStatus: invoke('skill:status'),
   installSkill: invoke('skill:install'),
   on: (channel, fn) => {
-    if (['tasks:changed', 'sessions:changed', 'prs:updated', 'prs:focus', 'notifications:changed', 'notifications:focus', 'settings:changed'].includes(channel)) ipcRenderer.on(channel, (_e, payload) => fn(payload));
+    if (['tasks:changed', 'sessions:changed', 'prs:updated', 'prs:focus', 'notifications:changed', 'notifications:focus', 'settings:changed', 'claude:jobs'].includes(channel)) ipcRenderer.on(channel, (_e, payload) => fn(payload));
   },
 });
