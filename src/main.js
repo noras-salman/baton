@@ -12,6 +12,25 @@ const hooks = require('../lib/hooks');
 
 let win;
 
+// If Baton was launched from inside Claude Code or VS Code (e.g. `open` from an integrated
+// terminal), macOS hands us their environment. Passing these markers on would make the Claude
+// sessions we start think they are sub-sessions of that process: no transcript, not resumable,
+// invisible to Baton. Only the markers are removed, not Claude settings like CLAUDE_CONFIG_DIR.
+const INHERITED_MARKERS = [
+  'CLAUDECODE', 'CLAUDE_CODE_CHILD_SESSION', 'CLAUDE_CODE_CHILD_NOTES_DIR', 'CLAUDE_CODE_SESSION_ID',
+  'CLAUDE_CODE_ENTRYPOINT', 'CLAUDE_CODE_MESSAGING_SOCKET', 'CLAUDE_CODE_MESSAGING_TOKEN',
+  'CLAUDE_CODE_SESSION_ATTENDED', 'CLAUDE_CODE_EXECPATH', 'CLAUDE_CODE_QUESTION_PREVIEW_FORMAT',
+  'CLAUDE_CODE_EMIT_STARTUP_TIMING', 'CLAUDE_CODE_STARTUP_FAILURE_RESULTS',
+  'CLAUDE_CODE_ENABLE_SDK_FILE_CHECKPOINTING', 'CLAUDE_CODE_ENABLE_TASKS', 'CLAUDE_AGENT_SDK_VERSION',
+  'CLAUDE_EFFORT', 'CLAUDE_PID', 'ELECTRON_RUN_AS_NODE',
+];
+for (const k of Object.keys(process.env)) {
+  if (INHERITED_MARKERS.includes(k) || k.startsWith('VSCODE_')) delete process.env[k];
+}
+// Terminal/iTerm may already carry them (they inherit from whoever launched them), so the
+// commands we type there unset them too.
+const CLEAN_ENV = `unset ${INHERITED_MARKERS.join(' ')} 2>/dev/null;`;
+
 function createWindow() {
   win = new BrowserWindow({
     width: 1280,
@@ -37,13 +56,22 @@ const asq = (s) => `"${String(s).replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
 
 function resumeCommand(sessionId, cwd) {
   if (!/^[0-9a-f-]{36}$/i.test(sessionId)) throw new Error('Invalid session id');
-  return `cd ${shq(cwd || require('os').homedir())} && claude --resume ${sessionId}`;
+  return `${CLEAN_ENV} cd ${shq(cwd || require('os').homedir())} && claude --resume ${sessionId}`;
 }
 
 function osascript(script) {
   return new Promise((resolve, reject) => {
     execFile('osascript', ['-e', script], (err, _out, stderr) => (err ? reject(new Error(stderr || err.message)) : resolve()));
   });
+}
+
+// Open the project folder in VS Code, then hand the Claude Code extension a link
+// (vscode://anthropic.claude-code/open?session=…|prompt=…) which it opens in its panel.
+function openInVSCode(folder, link) {
+  const run = (args) => new Promise((resolve, reject) => execFile('open', args, (err) => (err ? reject(err) : resolve())));
+  return run(['-a', 'Visual Studio Code', folder])
+    .then(() => new Promise((r) => setTimeout(r, 1500))) // let the window for that folder come forward
+    .then(() => run([link]));
 }
 
 async function openInTerminal(cmd, terminal) {
@@ -73,6 +101,11 @@ ipcMain.handle('sessions:link', (_e, id) => {
   return s ? sessions.sessionLink(s) : null;
 });
 ipcMain.handle('session:resume', async (_e, { sessionId, cwd, terminal }) => {
+  if (terminal === 'vscode') {
+    if (!/^[0-9a-f-]{36}$/i.test(sessionId)) throw new Error('Invalid session id');
+    await openInVSCode(cwd || require('os').homedir(), `vscode://anthropic.claude-code/open?session=${sessionId}`);
+    return { ok: true };
+  }
   const live = sessions.getSession(sessionId)?.live;
   if (live) {
     const { response } = await dialog.showMessageBox(win, {
@@ -101,7 +134,12 @@ ipcMain.handle('session:start', async (_e, { cwd, prompt, name, mode, terminal }
   const flags = [`--session-id ${sessionId}`];
   if (name) flags.push(`--name ${shq(String(name).slice(0, 80))}`);
   if (START_MODES.has(mode) && mode !== 'default') flags.push(`--permission-mode ${mode}`);
-  const cmd = `cd ${shq(cwd)} && claude ${flags.join(' ')} "$(cat ${shq(file)})"`;
+  if (terminal === 'vscode') {
+    // VS Code picks its own session id; the renderer links the session once it appears.
+    await openInVSCode(cwd, `vscode://anthropic.claude-code/open?prompt=${encodeURIComponent(prompt)}`);
+    return { sessionId: null, cwd, pending: true, startedAt: new Date().toISOString() };
+  }
+  const cmd = `${CLEAN_ENV} cd ${shq(cwd)} && claude ${flags.join(' ')} "$(cat ${shq(file)})"`;
   await openInTerminal(cmd, terminal);
   return { sessionId, cwd };
 });

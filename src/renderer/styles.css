@@ -256,3 +256,5 @@ details.ctx summary:hover { color: var(--muted); }
 
 .notif-icon.attention { background: rgba(226, 176, 74, 0.18); color: var(--amber); }
 .folder-select { margin-left: 4px; max-width: 420px; font-family: ui-monospace, monospace; font-size: 12px; }
+
+.sess-row.pending .t { color: var(--amber); }

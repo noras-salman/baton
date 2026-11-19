@@ -194,6 +194,7 @@ async function loadNotifications() {
 }
 async function loadSessions() {
   state.sessions = await api.listSessions();
+  linkPendingStarts();
 }
 async function refreshPRs({ quiet } = {}) {
   if (state.prLoading) return;
@@ -671,7 +672,14 @@ function renderDetail() {
 const emptyDetail = (msg) => h('div', { class: 'detail-empty' }, h('div', {}, msg));
 
 // ---- shared detail pieces --------------------------------------------------
-const terminal = () => localStorage.getItem('terminal') || 'terminal';
+// Where Claude sessions open: the VS Code extension panel, Terminal, or iTerm.
+const terminal = () => localStorage.getItem('terminal') || 'vscode';
+const OPEN_IN = [
+  ['vscode', 'VS Code'],
+  ['terminal', 'Terminal'],
+  ['iterm', 'iTerm'],
+];
+const openInLabel = (v = terminal()) => (OPEN_IN.find(([k]) => k === v) || OPEN_IN[0])[1];
 
 async function resume(sessionId, cwd) {
   try {
@@ -749,7 +757,7 @@ function sessionRow(link, { onUnlink, showContext } = {}) {
         h('span', {}, s ? `active ${ago(s.modifiedAt)}` : 'transcript not found'),
       ),
     ),
-    h('button', { class: 'btn small primary', onclick: () => resume(link.id, cwd) }, '▶ Resume'),
+    h('button', { class: 'btn small primary', title: `Open in ${openInLabel()}`, onclick: () => resume(link.id, cwd) }, terminal() === 'vscode' ? '▶ Open' : '▶ Resume'),
     h('button', { class: 'btn small', title: 'Copy resume command', onclick: () => copyResume(link.id, cwd) }, 'Copy cmd'),
     onUnlink ? h('button', { class: 'btn small ghost', onclick: onUnlink }, 'Unlink') : null,
   );
@@ -868,9 +876,19 @@ function taskDetail(t) {
           : null,
         h('button', { class: 'btn small', onclick: () => pickSessions(t) }, '+ Link sessions'),
       ],
+      t.pendingStart
+        ? h(
+            'div',
+            { class: 'sess-row pending' },
+            h('div', { class: 'grow' }, h('div', { class: 't' }, 'New session starting in VS Code…'), h('div', { class: 'm' }, h('span', {}, folder(t.pendingStart.cwd)), h('span', {}, `asked ${ago(t.pendingStart.at)}`), h('span', {}, 'links automatically once the prompt is sent'))),
+            h('button', { class: 'btn small ghost', onclick: () => saveTask({ ...t, pendingStart: null }) }, 'Cancel'),
+          )
+        : null,
       t.sessions.length
         ? t.sessions.map((l) => sessionRow(l, { showContext: true, onUnlink: () => saveTask({ ...t, sessions: t.sessions.filter((x) => x.id !== l.id) }) }))
-        : h('div', { class: 'muted' }, 'No sessions linked.'),
+        : t.pendingStart
+          ? null
+          : h('div', { class: 'muted' }, 'No sessions linked.'),
     ),
 
     card(
@@ -1383,6 +1401,34 @@ async function pickPRs(task) {
   saveTask(linkPRs(kept, urls));
 }
 
+// Sessions started in VS Code get their id from the extension, so we find them afterwards:
+// same folder, first message is this task's prompt, started after we asked.
+let linking = false;
+async function linkPendingStarts() {
+  if (linking) return;
+  linking = true;
+  try {
+    for (const t of state.tasks.filter((x) => x.pendingStart)) {
+      const p = t.pendingStart;
+      if (Date.now() - new Date(p.at) > 24 * 3600 * 1000) {
+        await saveTask({ ...t, pendingStart: null }, { quiet: true });
+        continue;
+      }
+      const marker = `Task: ${p.title}`;
+      const match = state.sessions.find(
+        (s) => s.cwd === p.cwd && s.modifiedAt >= p.at && (s.firstPrompt || '').includes(marker) && !t.sessions.some((x) => x.id === s.id),
+      );
+      if (!match) continue;
+      const link = await api.sessionLink(match.id);
+      await saveTask({ ...t, pendingStart: null, sessions: [...t.sessions, link || { id: match.id, cwd: match.cwd, title: match.title, context: null }] }, { quiet: true });
+      toast(`Linked the new Claude session to “${t.title}”`);
+    }
+  } finally {
+    linking = false;
+  }
+  render({ keepDetail: isEditing() });
+}
+
 // ---- start a Claude session from a task ------------------------------------------------
 // Where "Start with Claude" runs: the task's own folder, else a linked session's, else your
 // default from Settings, else the last folder you started in, else your most recent session's.
@@ -1454,6 +1500,22 @@ function openStartClaude(t) {
   const folders = recentFolders();
   let cwd = defaultFolderFor(t);
   let mode = localStorage.getItem('startMode') || 'plan';
+  let openIn = terminal();
+  const whereSel = h(
+    'select',
+    {
+      onchange: (e) => {
+        openIn = e.target.value;
+        hint.textContent = whereHint();
+      },
+    },
+    OPEN_IN.map(([v, label]) => h('option', { value: v, selected: openIn === v ? true : null }, label)),
+  );
+  const whereHint = () =>
+    openIn === 'vscode'
+      ? 'Opens the folder in VS Code and the Claude panel with this prompt. If it isn’t sent automatically, press Enter there. The mode is passed in the prompt; Baton links the session to this task once it starts.'
+      : `Runs claude in a new ${openInLabel(openIn)} window with the chosen permission mode, linked to this task.`;
+  const hint = h('div', { class: 'toggle-hint', style: 'margin-top:4px' }, whereHint());
 
   const folderSel = h('select', {});
   const drawFolders = () => {
@@ -1505,8 +1567,20 @@ function openStartClaude(t) {
       const prompt = buildPrompt(t, what.value, mode, withCtx.checked);
       localStorage.setItem('startMode', mode);
       localStorage.setItem('lastStartFolder', cwd);
-      const r = await api.startSession({ cwd, prompt, name: t.title, mode, terminal: terminal() });
+      const r = await api.startSession({ cwd, prompt, name: t.title, mode, terminal: openIn });
       dlg.close();
+      const fresh0 = state.tasks.find((x) => x.id === t.id) || t;
+      if (r.pending) {
+        await saveTask({
+          ...fresh0,
+          status: fresh0.status === 'todo' ? 'doing' : fresh0.status,
+          folder: cwd,
+          notes: fresh0.notes || what.value,
+          pendingStart: { at: r.startedAt, cwd: r.cwd, title: t.title },
+        });
+        toast('Opening in VS Code. Press Enter in the Claude panel if the prompt isn’t sent.');
+        return;
+      }
       // Link the new session right away; its transcript appears once Claude starts writing.
       const fresh = state.tasks.find((x) => x.id === t.id) || t;
       await saveTask({
@@ -1527,7 +1601,10 @@ function openStartClaude(t) {
       'div',
       { class: 'pick start' },
       h('h2', {}, 'Start with Claude'),
-      h('div', { class: 'muted', style: 'margin-bottom:6px' }, `Opens a new Claude Code session in ${terminal() === 'iterm' ? 'iTerm' : 'Terminal'}, linked to “${t.title}”.`),
+      h('div', { class: 'muted', style: 'margin-bottom:6px' }, `Starts a new Claude Code session linked to “${t.title}”.`),
+      h('label', { class: 'field-label' }, 'Open in'),
+      whereSel,
+      hint,
       h('label', { class: 'field-label' }, 'Project folder'),
       folderSel,
       h('label', { class: 'field-label' }, 'What needs to be done'),
@@ -1908,7 +1985,7 @@ function settingsDetail() {
       h(
         'label',
         { class: 'toggle row-toggle' },
-        h('span', { class: 'toggle-label' }, 'Resume Claude sessions in'),
+        h('span', { class: 'toggle-label' }, 'Open Claude sessions in'),
         h(
           'select',
           {
@@ -1918,10 +1995,7 @@ function settingsDetail() {
               toast('Saved');
             },
           },
-          [
-            ['terminal', 'Terminal'],
-            ['iterm', 'iTerm'],
-          ].map(([v, label]) => h('option', { value: v, selected: terminal() === v ? true : null }, label)),
+          OPEN_IN.map(([v, label]) => h('option', { value: v, selected: terminal() === v ? true : null }, label)),
         ),
       ),
       h(
