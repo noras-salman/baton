@@ -18,6 +18,8 @@ contextBridge.exposeInMainWorld('api', {
   openUrl: invoke('open:url'),
   cachedPRs: invoke('github:cached'),
   refreshPRs: invoke('github:refresh'),
+  mergePR: invoke('github:merge'),
+  disableAutoMerge: invoke('github:disableAutoMerge'),
   listNotifications: invoke('notifications:list'),
   setNotificationsRead: invoke('notifications:setRead'),
   removeNotifications: invoke('notifications:remove'),

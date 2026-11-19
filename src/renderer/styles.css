@@ -258,3 +258,16 @@ details.ctx summary:hover { color: var(--muted); }
 .folder-select { margin-left: 4px; max-width: 420px; font-family: ui-monospace, monospace; font-size: 12px; }
 
 .sess-row.pending .t { color: var(--amber); }
+
+/* merge */
+.btn.merge-btn { background: #2f9e5f; border-color: #2f9e5f; color: #fff; font-weight: 600; }
+.btn.merge-btn:hover { background: #38b26c; }
+.checklist { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 16px; margin-top: 14px; font-size: 12.5px; }
+.checklist .ok { color: var(--green); }
+.checklist .bad { color: var(--red); }
+.merge-note { margin-top: 12px; padding: 8px 10px; border-radius: 8px; background: var(--panel-2); border: 1px solid var(--line); color: var(--muted); line-height: 1.45; }
+.merge-note.warn { border-color: rgba(226, 176, 74, 0.45); color: var(--amber); }
+.merge-status { margin-top: 12px; color: var(--muted); }
+.merge-status:empty { display: none; }
+.merge-status.error { color: var(--red); white-space: pre-wrap; }
+#mergeDlg { width: 560px; }

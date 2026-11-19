@@ -1132,6 +1132,7 @@ function notificationDetail(n) {
       { class: 'row', style: 'margin-top:14px' },
       n.link ? h('button', { class: 'btn primary', onclick: () => api.openUrl(n.link) }, n.kind === 'comment' ? 'Open comment on GitHub ↗' : 'Open on GitHub ↗') : null,
       live ? h('button', { class: 'btn', onclick: () => showPRInBaton(n.url) }, 'Show PR in Baton') : null,
+      n.kind === 'ready' && live ? mergeButton(live) : null,
       prUrls.length
         ? h(
             'button',
@@ -1202,6 +1203,198 @@ function notificationDetail(n) {
   );
 }
 
+// ---- merging ------------------------------------------------------------------
+const METHOD_LABEL = { SQUASH: 'Squash and merge', MERGE: 'Create a merge commit', REBASE: 'Rebase and merge' };
+
+function mergeChecks(p) {
+  return [
+    [!p.draft, 'Not a draft', 'Draft'],
+    [p.reviewDecision === 'APPROVED' || p.reviewDecision == null, p.reviewDecision == null ? 'No review required' : 'Approved', p.reviewDecision === 'CHANGES_REQUESTED' ? 'Changes requested' : 'Not approved yet'],
+    [p.checks === 'SUCCESS' || p.checks == null, p.checks == null ? 'No checks' : 'Checks passing', p.checks === 'PENDING' || p.checks === 'EXPECTED' ? 'Checks still running' : 'Checks failing'],
+    [p.mergeable === 'MERGEABLE', 'No conflicts', p.mergeable === 'CONFLICTING' ? 'Has merge conflicts' : 'Mergeability unknown'],
+    [!p.unresolvedThreads, 'No unresolved threads', `${p.unresolvedThreads} unresolved thread${p.unresolvedThreads > 1 ? 's' : ''}`],
+  ];
+}
+
+function stackOfPR(p) {
+  return p.stackSize > 1 ? stackOf(p) : [p];
+}
+
+function mergeButton(p, cls = p.ready ? 'btn merge-btn' : 'btn') {
+  if (p.autoMerge) {
+    return h(
+      'button',
+      {
+        class: 'btn',
+        title: 'GitHub will merge this when requirements pass. Click to cancel.',
+        onclick: async () => {
+          if (!confirm(`Cancel auto-merge for #${p.number}?`)) return;
+          const r = await api.disableAutoMerge(p.url);
+          toast(r.ok ? 'Auto-merge cancelled' : `Couldn’t cancel: ${r.error}`);
+        },
+      },
+      `⏳ Auto-merge on · cancel`,
+    );
+  }
+  return h('button', { class: cls, onclick: () => openMerge(p) }, p.mergeReady || p.ready ? '⇣ Merge…' : 'Merge…');
+}
+
+function openMerge(p) {
+  const dlg = $('#mergeDlg');
+  const opts = p.mergeOptions || { methods: ['MERGE'], defaultMethod: 'MERGE', autoMergeAllowed: false, deletesBranch: false };
+  let method = opts.methods.includes(opts.defaultMethod) ? opts.defaultMethod : opts.methods[0];
+  const stack = stackOfPR(p);
+  const pos = stack.findIndex((x) => x.url === p.url);
+  const above = stack.slice(pos + 1);
+  const checks = mergeChecks(p);
+  const ready = checks.every(([ok]) => ok);
+  const del = h('input', { type: 'checkbox', checked: true });
+  const status = h('div', { class: 'merge-status' });
+  let busy = false;
+
+  const run = async (auto) => {
+    if (busy) return;
+    busy = true;
+    status.className = 'merge-status';
+    status.textContent = auto ? 'Enabling auto-merge…' : 'Merging…';
+    const r = await api.mergePR({ url: p.url, method, deleteBranch: del.checked, auto, headSha: p.headSha });
+    busy = false;
+    if (!r.ok) {
+      status.className = 'merge-status error';
+      status.textContent = r.error;
+      return;
+    }
+    // Success: offer to close out tasks that link this PR.
+    const tasks = state.tasks.filter((t) => t.status !== 'done' && t.prs.some((x) => x.url === p.url));
+    dlg.replaceChildren(
+      h(
+        'div',
+        { class: 'pick' },
+        h('h2', {}, auto ? `Auto-merge enabled for #${p.number}` : `Merged #${p.number}`),
+        h('div', { class: 'muted' }, auto ? 'GitHub will merge it as soon as every requirement passes.' : p.title),
+        above.length && !auto
+          ? h('div', { class: 'merge-note' }, `Next in the stack: #${above[0].number}. GitHub retargets it to ${p.base} once this branch is deleted.`)
+          : null,
+        tasks.length
+          ? h(
+              'div',
+              { style: 'margin-top:14px' },
+              h('div', { class: 'field-label' }, 'Linked tasks'),
+              tasks.map((t) =>
+                h(
+                  'div',
+                  { class: 'sess-row' },
+                  h('div', { class: 'grow' }, h('div', { class: 't' }, t.title), h('div', { class: 'm' }, `${t.prs.length} linked PR${t.prs.length > 1 ? 's' : ''}`)),
+                  h(
+                    'button',
+                    {
+                      class: 'btn small',
+                      onclick: async (e) => {
+                        await saveTask({ ...t, status: 'done' });
+                        e.target.textContent = '✓ Done';
+                        e.target.disabled = true;
+                      },
+                    },
+                    'Mark done',
+                  ),
+                ),
+              ),
+            )
+          : null,
+        h('div', { class: 'dlg-actions' }, h('button', { class: 'btn primary', onclick: () => dlg.close() }, 'Close')),
+      ),
+    );
+    toast(auto ? 'Auto-merge enabled' : `Merged #${p.number}`);
+  };
+
+  const methodBox = h('div', { class: 'modes' });
+  const drawMethods = () =>
+    methodBox.replaceChildren(
+      ...opts.methods.map((m) =>
+        h(
+          'label',
+          { class: `mode ${method === m ? 'on' : ''}` },
+          h('input', {
+            type: 'radio',
+            name: 'mergeMethod',
+            checked: method === m ? true : null,
+            onchange: () => {
+              method = m;
+              drawMethods();
+            },
+          }),
+          h('span', { class: 'toggle-label' }, METHOD_LABEL[m] || m, m === opts.defaultMethod ? h('span', { class: 'toggle-hint', style: 'display:inline;margin-left:6px' }, 'your default') : null),
+        ),
+      ),
+    );
+  drawMethods();
+
+  const blocked = pos > 0; // sits on another PR: merging would land it in that PR's branch, not the real base
+  const actions = blocked
+    ? [
+        h('button', { class: 'btn', onclick: () => dlg.close() }, 'Close'),
+        h(
+          'button',
+          {
+            class: 'btn primary',
+            onclick: () => {
+              dlg.close();
+              showPRInBaton(stack[0].url);
+            },
+          },
+          `Go to #${stack[0].number}`,
+        ),
+      ]
+    : p.draft
+      ? [h('button', { class: 'btn', onclick: () => dlg.close() }, 'Close')]
+      : [
+          h('button', { class: 'btn', onclick: () => dlg.close() }, 'Cancel'),
+          !ready ? h('button', { class: 'btn ghost danger', title: 'Try to merge anyway; GitHub refuses if branch protection requires more', onclick: () => run(false) }, 'Merge now anyway') : null,
+          !ready && opts.autoMergeAllowed ? h('button', { class: 'btn primary', onclick: () => run(true) }, 'Enable auto-merge') : null,
+          ready ? h('button', { class: 'btn merge-btn', onclick: () => run(false) }, `${METHOD_LABEL[method] ? 'Merge' : 'Merge'} #${p.number}`) : null,
+        ];
+
+  dlg.replaceChildren(
+    h(
+      'div',
+      { class: 'pick' },
+      h('h2', {}, `Merge #${p.number}`),
+      h('div', { class: 'muted' }, p.title),
+      h('div', { class: 'row', style: 'margin-top:8px' }, h('span', { class: 'pill mono' }, p.repo), h('span', { class: 'pill mono' }, `${p.branch} → ${p.base}`)),
+      blocked
+        ? h(
+            'div',
+            { class: 'merge-note warn' },
+            `This is PR ${pos + 1} of ${stack.length} in a stack, so it targets ${p.base}, not the main branch. Merge the stack from the bottom, starting with #${stack[0].number}; GitHub then retargets the next PR.`,
+          )
+        : [
+            h(
+              'div',
+              { class: 'checklist' },
+              checks.map(([ok, good, bad]) => h('div', { class: ok ? 'ok' : 'bad' }, ok ? `✓ ${good}` : `✗ ${bad}`)),
+            ),
+            p.stackSize > 1 && !p.mergeReady && ready ? h('div', { class: 'merge-note' }, 'This PR is ready, but other PRs in its stack are not.') : null,
+            above.length
+              ? h(
+                  'div',
+                  { class: 'merge-note' },
+                  `${above.length} PR${above.length > 1 ? 's sit' : ' sits'} on top of this one. When its branch is deleted, GitHub retargets #${above[0].number} to ${p.base}.${method === 'SQUASH' ? ' After a squash merge the next PR usually needs a rebase on the new base.' : ''}`,
+                )
+              : null,
+            p.draft ? h('div', { class: 'merge-note warn' }, 'Drafts can’t be merged. Mark it ready for review on GitHub first.') : null,
+            !p.draft ? [h('label', { class: 'field-label' }, 'Method'), methodBox] : null,
+            !p.draft
+              ? h('label', { class: 'toggle', style: 'margin-top:12px' }, del, opts.deletesBranch ? 'Delete the branch (the repo also does this automatically)' : `Delete branch ${p.branch} after merging`)
+              : null,
+            h('div', { class: 'toggle-hint', style: 'margin-top:10px' }, `Uses your gh login. Pinned to commit ${String(p.headSha || '').slice(0, 7)}: if the branch moved since Baton loaded it, GitHub refuses and nothing is merged.`),
+          ],
+      status,
+      h('div', { class: 'dlg-actions' }, actions),
+    ),
+  );
+  dlg.showModal();
+}
+
 // ---- PR detail --------------------------------------------------------------
 function stackOf(p) {
   const pool = allPRs().filter((x, i, arr) => arr.findIndex((y) => y.url === x.url) === i);
@@ -1227,7 +1420,8 @@ function prDetail(p) {
     h(
       'div',
       { class: 'row', style: 'margin-top:14px' },
-      h('button', { class: 'btn primary', onclick: () => openNewTask({ prUrls: [p.url], sessionIds: sess.slice(0, 1).map((s) => s.id), title: p.title }) }, '+ Create task from this PR'),
+      mergeButton(p),
+      h('button', { class: 'btn', onclick: () => openNewTask({ prUrls: [p.url], sessionIds: sess.slice(0, 1).map((s) => s.id), title: p.title }) }, '+ Create task'),
       h('button', { class: 'btn', onclick: () => api.openUrl(p.url) }, 'Open on GitHub ↗'),
       state.settings
         ? (() => {

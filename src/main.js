@@ -365,6 +365,24 @@ async function pollPRs() {
 }
 
 ipcMain.handle('github:cached', () => prData);
+ipcMain.handle('github:merge', async (_e, opts) => {
+  try {
+    const out = await github.mergePR(opts.url, opts);
+    pollPRs(); // refresh lists in the background
+    return { ok: true, out };
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+});
+ipcMain.handle('github:disableAutoMerge', async (_e, url) => {
+  try {
+    await github.disableAutoMerge(url);
+    pollPRs();
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+});
 
 ipcMain.handle('notifications:list', () => notifications.read());
 ipcMain.handle('notifications:setRead', (_e, { ids, read }) => {
