@@ -842,6 +842,7 @@ function taskDetail(t) {
         'Delete',
       ),
     ),
+    taskFolderRow(t),
     h('label', { class: 'field-label' }, 'Notes'),
     h('textarea', { rows: 4, placeholder: 'Add notes…', value: t.notes, oninput: (e) => patch({ notes: e.target.value }) }),
 
@@ -975,8 +976,9 @@ function showPRInBaton(url) {
   setTimeout(() => document.querySelector('#list .item.selected')?.scrollIntoView({ block: 'center' }), 50);
 }
 
-const NOTIF_ICON = { ready: '✓', comment: '💬', review: '👀', ci: '✗', session: '◆' };
-const NOTIF_LABEL = { ready: 'ready to merge', comment: 'comments', review: 'review request', ci: 'checks failing', session: 'Claude session' };
+const NOTIF_ICON = { ready: '✓', comment: '💬', review: '👀', ci: '✗', session: '◆', attention: '⏸' };
+const NOTIF_LABEL = { ready: 'ready to merge', comment: 'comments', review: 'review request', ci: 'checks failing', session: 'Claude session', attention: 'waiting on you' };
+const ATTENTION_LABEL = { permission: 'needs permission', question: 'has a question', plan: 'plan to approve', input: 'needs input' };
 
 function sessionNotificationDetail(n) {
   const s = sessionById(n.sessionId);
@@ -987,7 +989,7 @@ function sessionNotificationDetail(n) {
     h(
       'div',
       { class: 'row', style: 'margin-top:8px' },
-      h('span', { class: 'pill claude' }, 'Claude session'),
+      n.kind === 'attention' ? h('span', { class: 'pill wait' }, `⏸ ${ATTENTION_LABEL[n.reason] || 'waiting on you'}`) : h('span', { class: 'pill claude' }, 'Claude session'),
       h('span', { class: 'pill' }, `${dayLabel(n.createdAt)} · ${timeLabel(n.createdAt)}`),
       n.ranFor ? h('span', { class: 'pill' }, `ran ${n.ranFor >= 90 ? `${Math.round(n.ranFor / 60)} min` : `${Math.round(n.ranFor)} s`}`) : null,
       livePill(s?.live),
@@ -995,7 +997,10 @@ function sessionNotificationDetail(n) {
     h(
       'div',
       { class: 'row', style: 'margin-top:14px' },
-      h('button', { class: 'btn primary', onclick: () => resume(n.sessionId, (s && s.cwd) || n.cwd) }, '▶ Resume session'),
+      // A session that is still open lives in VS Code or a terminal; send you there instead of resuming a second copy.
+      s?.live?.entrypoint === 'claude-vscode'
+        ? h('button', { class: 'btn primary', onclick: () => api.openVSCode((s && s.cwd) || n.cwd) }, 'Go to VS Code')
+        : h('button', { class: 'btn primary', onclick: () => resume(n.sessionId, (s && s.cwd) || n.cwd) }, s?.live ? '▶ Open session' : '▶ Resume session'),
       s
         ? h(
             'button',
@@ -1013,8 +1018,15 @@ function sessionNotificationDetail(n) {
       h('div', { style: 'flex:1' }),
       notifActions(n),
     ),
+    n.kind === 'attention'
+      ? card({ permission: 'Waiting for your permission', question: 'Claude is asking', plan: 'Plan waiting for approval', input: 'Claude needs input' }[n.reason] || 'Waiting on you', null, h('div', { class: 'summary' }, n.body))
+      : null,
     n.lastPrompt ? card('You asked', null, h('div', { class: 'summary' }, n.lastPrompt)) : null,
-    card('Claude said', null, s?.recent?.length ? conversation(s.recent.slice(-2)) : h('div', { class: 'summary' }, n.body)),
+    n.kind === 'attention'
+      ? s?.recent?.length
+        ? card('Recent conversation', null, conversation(s.recent.slice(-2)))
+        : null
+      : card('Claude said', null, s?.recent?.length ? conversation(s.recent.slice(-2)) : h('div', { class: 'summary' }, n.body)),
   );
 }
 
@@ -1073,7 +1085,7 @@ async function loadSettings() {
 }
 
 function notificationDetail(n) {
-  if (n.kind === 'session') return sessionNotificationDetail(n);
+  if (n.kind === 'session' || n.kind === 'attention') return sessionNotificationDetail(n);
   const prUrls = n.stack ? n.stack.map((x) => x.url) : n.url ? [n.url] : [];
   const live = prByUrl(n.url);
   const refs = n.stack
@@ -1372,6 +1384,32 @@ async function pickPRs(task) {
 }
 
 // ---- start a Claude session from a task ------------------------------------------------
+// Where "Start with Claude" runs: the task's own folder, else a linked session's, else your
+// default from Settings, else the last folder you started in, else your most recent session's.
+function defaultFolderFor(t) {
+  return t.folder || t.sessions.map((s) => s.cwd).find(Boolean) || state.settings?.defaultFolder || localStorage.getItem('lastStartFolder') || recentFolders()[0] || '';
+}
+
+function taskFolderRow(t) {
+  const current = defaultFolderFor(t);
+  const source = t.folder ? '' : current ? ' (default)' : '';
+  const sel = h('select', { class: 'inline-select folder-select' });
+  const opts = [...new Set([t.folder, current, state.settings?.defaultFolder, ...recentFolders()].filter(Boolean))];
+  sel.replaceChildren(
+    ...opts.map((f) => h('option', { value: f, selected: f === current ? true : null }, home(f) + (f === current ? source : ''))),
+    h('option', { value: '__pick' }, 'Choose another folder…'),
+    t.folder ? h('option', { value: '__clear' }, 'Use default') : null,
+  );
+  sel.addEventListener('change', async () => {
+    let folder = sel.value;
+    if (folder === '__pick') folder = await api.pickFolder(current);
+    if (folder === '__clear') folder = '';
+    if (folder === null || folder === undefined) return renderDetail();
+    saveTask({ ...t, folder });
+  });
+  return h('div', { class: 'row', style: 'margin-top:10px' }, h('span', { class: 'muted' }, '📁 Project folder'), sel);
+}
+
 const START_MODES = [
   ['plan', 'Plan first', 'Read-only: Claude investigates and proposes a plan, no edits'],
   ['default', 'Work on it, ask before changes', 'Normal Claude Code permissions'],
@@ -1414,8 +1452,7 @@ function buildPrompt(t, what, mode, withContext) {
 function openStartClaude(t) {
   const dlg = $('#startDlg');
   const folders = recentFolders();
-  const linkedCwd = t.sessions.map((s) => s.cwd).find(Boolean);
-  let cwd = linkedCwd || folders[0] || '';
+  let cwd = defaultFolderFor(t);
   let mode = localStorage.getItem('startMode') || 'plan';
 
   const folderSel = h('select', {});
@@ -1467,6 +1504,7 @@ function openStartClaude(t) {
     try {
       const prompt = buildPrompt(t, what.value, mode, withCtx.checked);
       localStorage.setItem('startMode', mode);
+      localStorage.setItem('lastStartFolder', cwd);
       const r = await api.startSession({ cwd, prompt, name: t.title, mode, terminal: terminal() });
       dlg.close();
       // Link the new session right away; its transcript appears once Claude starts writing.
@@ -1474,6 +1512,7 @@ function openStartClaude(t) {
       await saveTask({
         ...fresh,
         status: fresh.status === 'todo' ? 'doing' : fresh.status,
+        folder: cwd,
         notes: fresh.notes || what.value,
         sessions: [...fresh.sessions, { id: r.sessionId, cwd: r.cwd, title: t.title, gitBranch: '', context: null }],
       });
@@ -1702,6 +1741,46 @@ api.on('prs:focus', (url) => {
   setTimeout(() => document.querySelector('#list .item.selected')?.scrollIntoView({ block: 'center' }), 50);
 });
 
+function hooksBox() {
+  const box = h('div', { class: 'skill-box' }, 'Checking Claude Code hooks…');
+  const draw = async () => {
+    const st = await api.hooksStatus();
+    const act = (label, fn, cls = 'btn small') =>
+      h(
+        'button',
+        {
+          class: cls,
+          style: 'margin-top:8px;margin-right:6px',
+          onclick: async () => {
+            try {
+              await fn();
+              toast('Done. Restart running Claude sessions to pick it up.');
+            } catch (e) {
+              toast(e.message);
+            }
+            draw();
+          },
+        },
+        label,
+      );
+    box.replaceChildren(
+      h('div', {}, h('b', {}, '“Waiting on you” hooks'), st.installed ? (st.current ? ' are installed.' : ' are installed but point at an older Baton.') : ' are not installed.'),
+      h(
+        'div',
+        { class: 'toggle-hint', style: 'margin-top:4px' },
+        'Adds Notification and PreToolUse (AskUserQuestion, ExitPlanMode) hooks to ',
+        h('code', {}, home(st.settingsFile)),
+        ' so Claude Code tells Baton when a session needs you. Your other settings are kept and a backup is saved next to the file. Sessions started before installing need a restart.',
+      ),
+      st.installed
+        ? [st.current ? null : act('Update hooks', () => api.installHooks(), 'btn small primary'), act('Remove hooks', () => api.uninstallHooks(), 'btn small ghost danger')]
+        : act('Install hooks', () => api.installHooks(), 'btn small primary'),
+    );
+  };
+  draw();
+  return box;
+}
+
 // ---- Settings view ------------------------------------------------------------------
 const SETTINGS_SECTIONS = [
   ['set-notify', 'Notifications', 'What Baton tells you about'],
@@ -1782,6 +1861,7 @@ function settingsDetail() {
       ),
       group(
         'Claude Code',
+        check('sessionAttention', 'A Claude session is waiting for my answer', 'Permission prompts, questions, and plans to approve. Needs the Claude Code hooks (Settings → Claude Code)'),
         check('sessionDone', 'A Claude session finishes', 'When a running session goes back to waiting for you'),
         h(
           'label',
@@ -1844,6 +1924,40 @@ function settingsDetail() {
           ].map(([v, label]) => h('option', { value: v, selected: terminal() === v ? true : null }, label)),
         ),
       ),
+      h(
+        'div',
+        { class: 'toggle row-toggle' },
+        h('span', {}, h('span', { class: 'toggle-label' }, 'Default folder for new Claude sessions'), h('span', { class: 'toggle-hint mono' }, st.defaultFolder ? home(st.defaultFolder) : 'Not set: uses the task’s linked session, then your last folder')),
+        h('div', { style: 'flex:1' }),
+        h(
+          'button',
+          {
+            class: 'btn small',
+            onclick: async () => {
+              const f = await api.pickFolder(st.defaultFolder);
+              if (!f) return;
+              await api.setSettings({ defaultFolder: f });
+              await loadSettings();
+              renderDetail();
+            },
+          },
+          'Choose…',
+        ),
+        st.defaultFolder
+          ? h(
+              'button',
+              {
+                class: 'btn small ghost',
+                onclick: async () => {
+                  await api.setSettings({ defaultFolder: '' });
+                  await loadSettings();
+                  renderDetail();
+                },
+              },
+              'Clear',
+            )
+          : null,
+      ),
       st.canLaunchAtLogin
         ? h(
             'label',
@@ -1862,7 +1976,7 @@ function settingsDetail() {
         : null,
     ),
 
-    h('div', { class: 'card', id: 'set-claude' }, h('h3', {}, 'Claude Code'), skillBox),
+    h('div', { class: 'card', id: 'set-claude' }, h('h3', {}, 'Claude Code'), hooksBox(), h('div', { style: 'height:12px' }), skillBox),
   );
 }
 

@@ -25,6 +25,9 @@ contextBridge.exposeInMainWorld('api', {
   clearAllNotifications: invoke('notifications:clearAll'),
   getSettings: invoke('settings:get'),
   setSettings: invoke('settings:set'),
+  hooksStatus: invoke('hooks:status'),
+  installHooks: invoke('hooks:install'),
+  uninstallHooks: invoke('hooks:uninstall'),
   skillStatus: invoke('skill:status'),
   installSkill: invoke('skill:install'),
   on: (channel, fn) => {

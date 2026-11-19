@@ -8,6 +8,7 @@ const skill = require('../lib/skill');
 const github = require('../lib/github');
 const prs = require('../lib/prs');
 const notifications = require('../lib/notifications');
+const hooks = require('../lib/hooks');
 
 let win;
 
@@ -251,6 +252,58 @@ function checkSessions() {
   for (const id of [...sessionSeen.keys()]) if (!live.has(id)) sessionSeen.delete(id);
 }
 
+// ---- "Claude needs you" events written by the Claude Code hooks (lib/hooks.js) ----------
+const ATTENTION_HEAD = {
+  permission: 'Claude needs permission',
+  question: 'Claude has a question',
+  plan: 'Claude has a plan to approve',
+  input: 'Claude needs your input',
+};
+const lastAttention = new Map(); // `${session}|${reason}|${body}` -> time, to collapse repeats
+
+function drainInbox() {
+  let files = [];
+  try {
+    files = fs.readdirSync(hooks.INBOX).filter((f) => f.endsWith('.json')).sort();
+  } catch {
+    return;
+  }
+  const events = [];
+  for (const f of files) {
+    const full = path.join(hooks.INBOX, f);
+    try {
+      events.push(JSON.parse(fs.readFileSync(full, 'utf8')));
+    } catch {
+      /* skip unreadable */
+    }
+    try {
+      fs.unlinkSync(full);
+    } catch {
+      /* already gone */
+    }
+  }
+  const now = Date.now();
+  const notes = [];
+  for (const ev of events) {
+    if (now - new Date(ev.at).getTime() > 10 * 60 * 1000) continue; // stale (Baton wasn't running)
+    const key = `${ev.sessionId}|${ev.reason}|${ev.body}`;
+    if (now - (lastAttention.get(key) || 0) < 60 * 1000) continue;
+    lastAttention.set(key, now);
+    const s = sessions.getSession(ev.sessionId);
+    const name = (s && s.title) || path.basename(ev.cwd || '') || 'Claude session';
+    notes.push({
+      kind: 'attention',
+      reason: ev.reason,
+      sessionId: ev.sessionId,
+      cwd: (s && s.cwd) || ev.cwd || '',
+      gitBranch: (s && s.gitBranch) || '',
+      title: `${ATTENTION_HEAD[ev.reason] || 'Claude needs you'}: ${name}`,
+      body: ev.body,
+    });
+  }
+  if (notes.length) deliver(notes);
+}
+
 async function pollPRs() {
   if (prInflight) return prInflight;
   prInflight = (async () => {
@@ -315,6 +368,10 @@ ipcMain.handle('settings:set', (_e, patch) => {
   return true;
 });
 
+ipcMain.handle('hooks:status', () => hooks.status());
+ipcMain.handle('hooks:install', () => hooks.install());
+ipcMain.handle('hooks:uninstall', () => hooks.uninstall());
+
 ipcMain.handle('skill:status', () => skill.status());
 ipcMain.handle('skill:install', () => skill.install());
 
@@ -363,6 +420,18 @@ app.whenReady().then(() => {
   setInterval(pollPRs, POLL_MS);
   checkSessions(); // seed current statuses silently
   setInterval(checkSessions, 5000);
+  fs.mkdirSync(hooks.INBOX, { recursive: true });
+  drainInbox();
+  try {
+    let t;
+    fs.watch(hooks.INBOX, () => {
+      clearTimeout(t);
+      t = setTimeout(drainInbox, 200);
+    });
+  } catch {
+    /* fall back to polling below */
+  }
+  setInterval(drainInbox, 5000);
   app.on('activate', showWindow);
   app.on('browser-window-focus', updateBadge);
 });

@@ -92,6 +92,21 @@ switch (args._[0]) {
   case 'list':
     cmdList();
     break;
+  case 'hook':
+    // Called by Claude Code hooks; must be quick, silent, and never block Claude.
+    try {
+      require('../lib/hooks').recordHook(readStdin());
+    } catch {
+      /* never fail the hook */
+    }
+    process.exit(0);
+    break;
+  case 'install-hooks':
+    console.log(JSON.stringify(require('../lib/hooks').install()));
+    break;
+  case 'uninstall-hooks':
+    console.log(JSON.stringify(require('../lib/hooks').uninstall()));
+    break;
   case 'install-skill':
     cmdInstallSkill();
     break;

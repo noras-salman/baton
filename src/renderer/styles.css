@@ -253,3 +253,6 @@ details.ctx summary:hover { color: var(--muted); }
 .prompt-preview { white-space: pre-wrap; font: 12px ui-monospace, monospace; color: var(--muted); background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 10px; max-height: 220px; overflow: auto; margin: 0; }
 .start select { width: 100%; }
 #startDlg { width: 680px; }
+
+.notif-icon.attention { background: rgba(226, 176, 74, 0.18); color: var(--amber); }
+.folder-select { margin-left: 4px; max-width: 420px; font-family: ui-monospace, monospace; font-size: 12px; }
