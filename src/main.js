@@ -405,7 +405,14 @@ ipcMain.handle('claude:send', async (_e, { sessionId, message, mode }) => {
 
   const args = ['-p', message, '--resume', sessionId, '--output-format', 'json'];
   if (['plan', 'acceptEdits', 'auto'].includes(mode)) args.push('--permission-mode', mode);
-  const child = spawn(claudeBin(), args, { cwd: s.cwd || require('os').homedir(), env: process.env, stdio: ['ignore', 'pipe', 'pipe'] });
+  // Headless runs tag their turns "sdk-cli", and the VS Code extension hides sessions whose
+  // tag reads as sdk-*. Keep the session's original client tag so it stays listed there.
+  const entrypoint = sessions.originalEntrypoint(s.file) || 'cli';
+  const child = spawn(claudeBin(), args, {
+    cwd: s.cwd || require('os').homedir(),
+    env: { ...process.env, CLAUDE_CODE_ENTRYPOINT: entrypoint },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
   claudeJobs.set(sessionId, { startedAt: new Date().toISOString(), message: message.slice(0, 300) });
   send('claude:jobs');
   let out = '';
