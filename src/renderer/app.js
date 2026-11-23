@@ -109,6 +109,7 @@ function stackHealth(stack) {
   const n = stack.length;
   const approved = stack.filter((p) => p.reviewDecision === 'APPROVED').length;
   const failing = stack.filter((p) => p.checks === 'FAILURE' || p.checks === 'ERROR').length;
+  const running = stack.filter(ciRunning).length;
   const changes = stack.filter((p) => p.reviewDecision === 'CHANGES_REQUESTED').length;
   const threads = stack.reduce((a, p) => a + (p.unresolvedThreads || 0), 0);
   const conflicts = stack.filter((p) => p.mergeable === 'CONFLICTING').length;
@@ -117,7 +118,8 @@ function stackHealth(stack) {
   return [
     awaiting ? h('span', { class: 'pill bad' }, `💬 ${awaiting} to address`) : null,
     h('span', { class: `pill ${approved === n ? 'ok' : ''}` }, `${approved}/${n} approved`),
-    failing ? h('span', { class: 'pill bad' }, `✗ ${failing} failing`) : h('span', { class: 'pill ok' }, '✓ CI'),
+    failing ? h('span', { class: 'pill bad' }, `✗ ${failing} failing`) : running ? null : h('span', { class: 'pill ok' }, '✓ CI'),
+    running ? runningPill(`${running} running`) : null,
     changes ? h('span', { class: 'pill bad' }, `${changes} changes requested`) : null,
     threads && !awaiting ? h('span', { class: 'pill wait' }, `💬 ${threads}`) : null,
     conflicts ? h('span', { class: 'pill bad' }, `${conflicts} conflicting`) : null,
@@ -163,6 +165,14 @@ function setAllStacks(open) {
   renderList();
 }
 
+// CI still running: a small spinning ring instead of a static dot.
+function ciRunning(p) {
+  return p.checks === 'PENDING' || p.checks === 'EXPECTED';
+}
+function runningPill(label) {
+  return h('span', { class: 'pill wait running', title: 'Checks are running' }, h('span', { class: 'ci-spin' }), label);
+}
+
 // ---- pills ----------------------------------------------------------------
 function livePill(live) {
   if (!live) return null;
@@ -175,7 +185,7 @@ function prStatusPills(p, { compact } = {}) {
   if (p.draft) out.push(h('span', { class: 'pill' }, 'draft'));
   if (p.checks === 'SUCCESS') out.push(h('span', { class: 'pill ok' }, compact ? '✓ CI' : '✓ checks passing'));
   else if (p.checks === 'FAILURE' || p.checks === 'ERROR') out.push(h('span', { class: 'pill bad' }, compact ? '✗ CI' : '✗ checks failing'));
-  else if (p.checks === 'PENDING' || p.checks === 'EXPECTED') out.push(h('span', { class: 'pill wait' }, compact ? '● CI' : '● checks running'));
+  else if (ciRunning(p)) out.push(runningPill(compact ? 'CI' : 'checks running'));
   if (p.reviewDecision === 'APPROVED') out.push(h('span', { class: 'pill ok' }, 'approved'));
   else if (p.reviewDecision === 'CHANGES_REQUESTED') out.push(h('span', { class: 'pill bad' }, 'changes requested'));
   else if (p.reviewDecision === 'REVIEW_REQUIRED' && !compact) out.push(h('span', { class: 'pill' }, 'review required'));
@@ -566,7 +576,7 @@ function renderList() {
                     h(
                       'button',
                       {
-                        class: `mini ${p.mergeReady ? 'ok' : (isMine(p) && p.needsResponse) || p.checks === 'FAILURE' || p.mergeable === 'CONFLICTING' ? 'bad' : p.ready ? 'ok-ish' : ''} ${state.selected === p.url ? 'sel' : ''}`,
+                        class: `mini ${ciRunning(p) ? 'running' : ''} ${p.mergeReady ? 'ok' : (isMine(p) && p.needsResponse) || p.checks === 'FAILURE' || p.mergeable === 'CONFLICTING' ? 'bad' : p.ready ? 'ok-ish' : ''} ${state.selected === p.url ? 'sel' : ''}`,
                         title: `#${p.number} ${p.title}`,
                         onclick: () => {
                           state.stackOpen[full[0].url] = true;

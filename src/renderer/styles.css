@@ -287,3 +287,10 @@ details.ctx summary:hover { color: var(--muted); }
 .job { display: flex; gap: 10px; align-items: center; color: var(--muted); }
 .spinner { width: 14px; height: 14px; border: 2px solid var(--line); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.8s linear infinite; flex-shrink: 0; }
 @keyframes spin { to { transform: rotate(360deg); } }
+
+/* CI running */
+.ci-spin { width: 9px; height: 9px; border-radius: 50%; border: 1.5px solid rgba(226, 176, 74, 0.3); border-top-color: var(--amber); display: inline-block; animation: spin 0.9s linear infinite; flex-shrink: 0; }
+.pill.running { gap: 5px; }
+.stack-mini .mini.running { border-color: rgba(226, 176, 74, 0.55); color: var(--amber); animation: ci-pulse 1.4s ease-in-out infinite; }
+@keyframes ci-pulse { 50% { background: rgba(226, 176, 74, 0.18); } }
+@media (prefers-reduced-motion: reduce) { .ci-spin, .stack-mini .mini.running { animation: none; } }
