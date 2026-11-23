@@ -19,6 +19,7 @@ contextBridge.exposeInMainWorld('api', {
   cachedPRs: invoke('github:cached'),
   refreshPRs: invoke('github:refresh'),
   mergePR: invoke('github:merge'),
+  approvePR: invoke('github:approve'),
   prConversation: invoke('github:conversation'),
   sendToClaude: invoke('claude:send'),
   claudeJobs: invoke('claude:jobs'),

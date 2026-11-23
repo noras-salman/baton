@@ -745,7 +745,7 @@ function conversation(recent) {
   return h(
     'div',
     { class: 'convo' },
-    recent.map((m) => h('div', { class: `msg ${m.role}` }, h('span', { class: 'who' }, m.role === 'user' ? 'You' : 'Claude'), m.text)),
+    recent.map((m) => h('div', { class: `msg ${m.role}` }, h('span', { class: 'who' }, m.role === 'user' ? 'You' : 'Claude'), md(m.text))),
   );
 }
 
@@ -870,7 +870,7 @@ function taskDetail(t) {
     h('label', { class: 'field-label' }, 'Notes'),
     h('textarea', { rows: 4, placeholder: 'Add notes…', value: t.notes, oninput: (e) => patch({ notes: e.target.value }) }),
 
-    t.summary ? card('Agent handoff', null, h('div', { class: 'summary' }, t.summary)) : null,
+    t.summary ? card('Agent handoff', null, md(t.summary)) : null,
 
     card(
       `Claude sessions${t.sessions.length ? ` (${t.sessions.length})` : ''}`,
@@ -1236,7 +1236,7 @@ const REVIEW_VERB = { APPROVED: 'approved', CHANGES_REQUESTED: 'requested change
 
 function commentBody(text) {
   if (!text) return null;
-  const body = h('div', { class: 'cbody' }, text);
+  const body = h('div', { class: 'cbody' }, md(text));
   if (text.split('\n').length <= 8 && text.length <= 700) return body;
   body.classList.add('clamped');
   return [
@@ -1396,6 +1396,58 @@ function mergeChecks(p) {
 
 function stackOfPR(p) {
   return p.stackSize > 1 ? stackOf(p) : [p];
+}
+
+// Approve someone else's PR (gh pr review --approve), with an optional comment.
+function approveButton(p) {
+  if (isMine(p) || !state.prs) return null;
+  return h('button', { class: 'btn approve-btn', onclick: () => openApprove(p) }, '✓ Approve…');
+}
+
+function openApprove(p) {
+  const dlg = $('#mergeDlg');
+  const body = h('textarea', { rows: 3, placeholder: 'Optional comment (markdown), e.g. “LGTM”' });
+  const status = h('div', { class: 'merge-status' });
+  const warnings = [
+    p.draft && 'This is still a draft.',
+    (p.checks === 'FAILURE' || p.checks === 'ERROR') && 'Checks are failing.',
+    ciRunning(p) && 'Checks are still running.',
+    p.unresolvedThreads && `${p.unresolvedThreads} review thread${p.unresolvedThreads > 1 ? 's are' : ' is'} unresolved.`,
+    p.mergeable === 'CONFLICTING' && 'It has merge conflicts.',
+  ].filter(Boolean);
+  let busy = false;
+  const approve = async () => {
+    if (busy) return;
+    busy = true;
+    status.className = 'merge-status';
+    status.textContent = 'Approving…';
+    const r = await api.approvePR({ url: p.url, body: body.value });
+    busy = false;
+    if (!r.ok) {
+      status.className = 'merge-status error';
+      status.textContent = r.error;
+      return;
+    }
+    dlg.close();
+    toast(`Approved #${p.number}`);
+  };
+  dlg.replaceChildren(
+    h(
+      'div',
+      { class: 'pick' },
+      h('h2', {}, `Approve #${p.number}`),
+      h('div', { class: 'muted' }, p.title),
+      h('div', { class: 'row', style: 'margin-top:8px' }, h('span', { class: 'pill mono' }, p.repo), h('span', { class: 'pill' }, `by @${p.author}`)),
+      warnings.length ? h('div', { class: 'merge-note warn' }, warnings.join(' ')) : null,
+      h('label', { class: 'field-label' }, 'Comment'),
+      body,
+      h('div', { class: 'toggle-hint', style: 'margin-top:8px' }, 'Submits an approving review with your gh login.'),
+      status,
+      h('div', { class: 'dlg-actions' }, h('button', { class: 'btn', onclick: () => dlg.close() }, 'Cancel'), h('button', { class: 'btn approve-btn solid', onclick: approve }, `Approve #${p.number}`)),
+    ),
+  );
+  dlg.showModal();
+  body.focus();
 }
 
 function mergeButton(p, cls = p.ready ? 'btn merge-btn' : 'btn') {
@@ -1598,6 +1650,7 @@ function prDetail(p) {
     h(
       'div',
       { class: 'row', style: 'margin-top:14px' },
+      approveButton(p),
       mergeButton(p),
       h('button', { class: 'btn', onclick: () => openNewTask({ prUrls: [p.url], sessionIds: sess.slice(0, 1).map((s) => s.id), title: p.title }) }, '+ Create task'),
       h('button', { class: 'btn', onclick: () => api.openUrl(p.url) }, 'Open on GitHub ↗'),

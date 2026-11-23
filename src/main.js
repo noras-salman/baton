@@ -459,6 +459,15 @@ ipcMain.handle('github:merge', async (_e, opts) => {
     return { ok: false, error: e.message };
   }
 });
+ipcMain.handle('github:approve', async (_e, { url, body }) => {
+  try {
+    await github.approvePR(url, body);
+    pollPRs();
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+});
 ipcMain.handle('github:disableAutoMerge', async (_e, url) => {
   try {
     await github.disableAutoMerge(url);

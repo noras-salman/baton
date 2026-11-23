@@ -37,6 +37,8 @@ npm start
 - **Merge**: "Merge…" on any PR (and on ready-to-merge notifications) shows what's still blocking, the merge methods the repo allows, and delete-branch. It runs `gh pr merge` pinned to the commit you saw (`--match-head-commit`), or enables auto-merge when the PR isn't ready yet. PRs in the middle of a stack point you to the bottom PR instead. After merging, it offers to mark linked tasks done.
 - **PR conversation**: each PR shows its full comment history (description, review threads with file and line, reviews, comments), with All / Unresolved / Reviews filters.
 - **Message Claude**: from a session, its notifications, or a task's linked sessions. Closed sessions continue in the background with `claude -p --resume <id>` (Auto / Accept edits / Plan), the reply lands in the same session, and you get a notification. Sessions open in VS Code get the message in their panel. Sessions open in a terminal have to be answered there.
+- **Markdown**: PR comments, Claude's messages, and agent handoffs render markdown (headings, emphasis, code, links, lists, quotes, tables) with a built-in renderer that creates DOM nodes directly and never injects HTML. Links open in your browser.
+- **Approve**: "✓ Approve…" on PRs you didn't author submits an approving review with `gh pr review --approve`, with an optional comment. It warns first about failing checks, open threads, drafts, or conflicts.
 - **PR ↔ session matching**: a session counts as linked to a PR if its transcript recorded that PR (Claude Code writes a `pr-link` entry when a session creates or touches one) or if the session ran on the PR's branch.
 
 ## `/task` inside Claude Code
