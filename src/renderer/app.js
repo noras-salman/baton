@@ -278,6 +278,9 @@ function render({ keepDetail } = {}) {
   }
   c.live = state.sessions.filter((s) => s.live).length || '';
   c.prs = state.prs ? state.prs.mine.length : '';
+  // Sidebar badges: ready-to-merge units (a ready stack counts once) and PRs with comments to address.
+  c.prsReady = state.prs ? new Set(state.prs.mine.filter((p) => p.mergeReady).map((p) => p.stackRoot || p.url)).size || '' : '';
+  c.prsRespond = state.prs ? state.prs.mine.filter((p) => p.needsResponse).length || '' : '';
   c.reviews = state.prs ? state.prs.review.length : '';
   c.unread = state.notifications.filter((n) => !n.read).length || '';
   document.querySelectorAll('[data-count]').forEach((el) => (el.textContent = c[el.dataset.count] || ''));
@@ -2427,6 +2430,45 @@ function settingsDetail() {
     h('div', { class: 'card', id: 'set-claude' }, h('h3', {}, 'Claude Code'), hooksBox(), h('div', { style: 'height:12px' }), skillBox),
   );
 }
+
+// ---- resizable panes ----------------------------------------------------------------
+const PANE_LIMITS = { sidebar: [170, 360, 220], list: [260, 720, 380] }; // min, max, default
+function setPaneWidth(which, px) {
+  const [min, max] = PANE_LIMITS[which];
+  const w = Math.round(Math.min(max, Math.max(min, px)));
+  document.querySelector('.app').style.setProperty(which === 'sidebar' ? '--sidebar-w' : '--list-w', `${w}px`);
+  return w;
+}
+for (const which of Object.keys(PANE_LIMITS)) {
+  const saved = Number(localStorage.getItem(`pane:${which}`));
+  if (saved) setPaneWidth(which, saved);
+}
+document.querySelectorAll('.resizer').forEach((handle) => {
+  const which = handle.dataset.resize;
+  handle.addEventListener('dblclick', () => {
+    localStorage.removeItem(`pane:${which}`);
+    setPaneWidth(which, PANE_LIMITS[which][2]);
+  });
+  handle.addEventListener('mousedown', (e) => {
+    e.preventDefault();
+    const pane = which === 'sidebar' ? $('.sidebar') : $('.list-pane');
+    const startX = e.clientX;
+    const startW = pane.getBoundingClientRect().width;
+    let last = startW;
+    handle.classList.add('dragging');
+    document.body.classList.add('resizing');
+    const move = (ev) => (last = setPaneWidth(which, startW + ev.clientX - startX));
+    const up = () => {
+      window.removeEventListener('mousemove', move);
+      window.removeEventListener('mouseup', up);
+      handle.classList.remove('dragging');
+      document.body.classList.remove('resizing');
+      localStorage.setItem(`pane:${which}`, String(last));
+    };
+    window.addEventListener('mousemove', move);
+    window.addEventListener('mouseup', up);
+  });
+});
 
 (async () => {
   const [, , cached] = await Promise.all([loadTasks(), loadSessions(), api.cachedPRs(), loadNotifications()]);

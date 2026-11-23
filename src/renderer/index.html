@@ -21,7 +21,13 @@
           <a data-view="done">Done <span class="count" data-count="done"></span></a>
           <div class="nav-sep"></div>
           <a data-view="sessions">Claude sessions <span class="count" data-count="live"></span></a>
-          <a data-view="prs">Pull requests <span class="count" data-count="prs"></span></a>
+          <a data-view="prs">Pull requests
+            <span class="nav-badges">
+              <span class="nb green" data-count="prsReady" title="Ready to merge"></span>
+              <span class="nb red" data-count="prsRespond" title="Comments to address"></span>
+              <span class="count" data-count="prs"></span>
+            </span>
+          </a>
           <a data-view="reviews">Review requests <span class="count" data-count="reviews"></span></a>
         </nav>
         <div class="sidebar-foot">
@@ -31,6 +37,7 @@
         </div>
       </aside>
 
+      <div class="resizer" data-resize="sidebar" title="Drag to resize · double-click to reset"></div>
       <section class="list-pane">
         <div class="drag"></div>
         <div class="list-head">
@@ -52,6 +59,7 @@
         <div id="list" class="list"></div>
       </section>
 
+      <div class="resizer" data-resize="list" title="Drag to resize · double-click to reset"></div>
       <main class="detail-pane" id="detail"></main>
     </div>
 

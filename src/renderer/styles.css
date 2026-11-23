@@ -24,7 +24,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
 kbd { font-family: ui-monospace, monospace; font-size: 10px; opacity: 0.6; margin-left: 6px; }
 code, .mono { font-family: ui-monospace, 'SF Mono', Menlo, monospace; font-size: 12px; }
 
-.app { display: grid; grid-template-columns: 220px 380px minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); height: 100vh; }
+.app { --sidebar-w: 220px; --list-w: 380px; display: grid; grid-template-columns: var(--sidebar-w) 0 var(--list-w) 0 minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); height: 100vh; }
 .app > * { min-height: 0; }
 .list { min-height: 0; }
 .drag { -webkit-app-region: drag; height: 38px; flex-shrink: 0; }
@@ -294,3 +294,16 @@ details.ctx summary:hover { color: var(--muted); }
 .stack-mini .mini.running { border-color: rgba(226, 176, 74, 0.55); color: var(--amber); animation: ci-pulse 1.4s ease-in-out infinite; }
 @keyframes ci-pulse { 50% { background: rgba(226, 176, 74, 0.18); } }
 @media (prefers-reduced-motion: reduce) { .ci-spin, .stack-mini .mini.running { animation: none; } }
+
+/* sidebar PR badges */
+.nav-badges { display: inline-flex; gap: 4px; align-items: center; margin-left: 8px; }
+.nb { min-width: 18px; height: 17px; padding: 0 5px; border-radius: 99px; font-size: 10.5px; font-weight: 700; line-height: 17px; text-align: center; font-variant-numeric: tabular-nums; }
+.nb:empty { display: none; }
+.nb.green { background: var(--green); color: #0b1a10; }
+.nb.red { background: var(--red); color: #2a0b0b; }
+/* resizable panes: zero-width grid columns holding an invisible, wider hit area */
+.resizer { position: relative; z-index: 5; -webkit-app-region: no-drag; }
+.resizer::after { content: ''; position: absolute; top: 0; bottom: 0; left: -4px; width: 8px; cursor: col-resize; }
+.resizer::before { content: ''; position: absolute; top: 0; bottom: 0; left: -1px; width: 2px; background: transparent; transition: background 0.15s; }
+.resizer:hover::before, .resizer.dragging::before { background: var(--accent); }
+body.resizing { cursor: col-resize; user-select: none; }
