@@ -1,4 +1,15 @@
 /* global api */
+// DOM's append/replaceChildren turn null into the text "null". Conditional children are
+// everywhere in this UI, so skip empty ones (and flatten arrays) for every element.
+for (const method of ['append', 'replaceChildren']) {
+  const original = Element.prototype[method];
+  Element.prototype[method] = function (...kids) {
+    return original.apply(
+      this,
+      kids.flat(Infinity).filter((k) => k != null && k !== false),
+    );
+  };
+}
 const state = {
   tasks: [],
   sessions: [],
@@ -10,7 +21,7 @@ const state = {
   search: '',
   groupStacks: localStorage.getItem('groupStacks') !== '0',
   prFilter: localStorage.getItem('prFilter') || 'all', // all | ready | respond
-  hideDrafts: JSON.parse(localStorage.getItem('hideDrafts') || '{}'), // view -> bool
+  hideDrafts: JSON.parse(localStorage.getItem('hideDraftsV2') || '{}'), // view -> bool; drafts hidden unless set to false
   reviewAuthor: localStorage.getItem('reviewAuthor') || '', // '' = everyone
   notifications: [],
   settings: null, // from main: { notify: prefs, repos, openAtLogin, ... }
@@ -167,7 +178,8 @@ function setAllStacks(open) {
   renderList();
 }
 
-// Draft / author filters for the PR lists.
+// Draft / author filters for the PR lists. Drafts are hidden by default.
+const hidingDrafts = (view = state.view) => state.hideDrafts[view] !== false;
 function renderListFilters() {
   const box = $('#listFilters');
   box.hidden = !isPRView() || !state.prs;
@@ -183,10 +195,10 @@ function renderListFilters() {
     { class: 'toggle', title: `${drafts} draft${drafts === 1 ? '' : 's'}` },
     h('input', {
       type: 'checkbox',
-      checked: state.hideDrafts[state.view] ? true : null,
+      checked: hidingDrafts() ? true : null,
       onchange: (e) => {
         state.hideDrafts[state.view] = e.target.checked;
-        localStorage.setItem('hideDrafts', JSON.stringify(state.hideDrafts));
+        localStorage.setItem('hideDraftsV2', JSON.stringify(state.hideDrafts));
         rerender();
       },
     }),
@@ -578,7 +590,7 @@ function renderList() {
     const section = (label, prs) => {
       const searched = prs
         .filter((p) => matches([p.title, p.repo, p.number, p.branch, p.author].join(' ')))
-        .filter((p) => !(state.hideDrafts[state.view] && p.draft))
+        .filter((p) => !(hidingDrafts() && p.draft))
         .filter((p) => state.view !== 'reviews' || !state.reviewAuthor || p.author === state.reviewAuthor);
       const f = activePRFilter();
       const keep = (p) => f === 'all' || (f === 'ready' ? p.mergeReady : p.needsResponse);
