@@ -10,6 +10,8 @@ const state = {
   search: '',
   groupStacks: localStorage.getItem('groupStacks') !== '0',
   prFilter: localStorage.getItem('prFilter') || 'all', // all | ready | respond
+  hideDrafts: JSON.parse(localStorage.getItem('hideDrafts') || '{}'), // view -> bool
+  reviewAuthor: localStorage.getItem('reviewAuthor') || '', // '' = everyone
   notifications: [],
   settings: null, // from main: { notify: prefs, repos, openAtLogin, ... }
   convo: {}, // PR url -> { loading, data, error, filter }
@@ -163,6 +165,73 @@ function setAllStacks(open) {
   localStorage.setItem('stackOpen', JSON.stringify(state.stackOpen));
   renderListHead();
   renderList();
+}
+
+// Draft / author filters for the PR lists.
+function renderListFilters() {
+  const box = $('#listFilters');
+  box.hidden = !isPRView() || !state.prs;
+  if (box.hidden) return;
+  const list = state.view === 'reviews' ? state.prs.review : state.prs.mine;
+  const drafts = list.filter((p) => p.draft).length;
+  const rerender = () => {
+    renderListHead();
+    renderList();
+  };
+  const draftToggle = h(
+    'label',
+    { class: 'toggle', title: `${drafts} draft${drafts === 1 ? '' : 's'}` },
+    h('input', {
+      type: 'checkbox',
+      checked: state.hideDrafts[state.view] ? true : null,
+      onchange: (e) => {
+        state.hideDrafts[state.view] = e.target.checked;
+        localStorage.setItem('hideDrafts', JSON.stringify(state.hideDrafts));
+        rerender();
+      },
+    }),
+    `Hide drafts${drafts ? ` (${drafts})` : ''}`,
+  );
+  if (state.view !== 'reviews') return box.replaceChildren(draftToggle);
+
+  const counts = {};
+  for (const p of list) counts[p.author] = (counts[p.author] || 0) + 1;
+  const authors = Object.keys(counts).sort((a, b) => counts[b] - counts[a] || a.localeCompare(b));
+  if (state.reviewAuthor && !counts[state.reviewAuthor]) authors.unshift(state.reviewAuthor); // keep the choice visible even if they have none open now
+  const sel = h(
+    'select',
+    {
+      class: 'inline-select author-select',
+      onchange: (e) => {
+        state.reviewAuthor = e.target.value;
+        localStorage.setItem('reviewAuthor', state.reviewAuthor);
+        rerender();
+      },
+    },
+    h('option', { value: '', selected: state.reviewAuthor ? null : true }, `All authors (${list.length})`),
+    authors.map((a) => h('option', { value: a, selected: state.reviewAuthor === a ? true : null }, `@${a} (${counts[a] || 0})`)),
+  );
+  box.replaceChildren(
+    h('span', { class: 'muted' }, 'Author'),
+    sel,
+    state.reviewAuthor
+      ? h(
+          'button',
+          {
+            class: 'btn small ghost',
+            title: 'Show all authors',
+            onclick: () => {
+              state.reviewAuthor = '';
+              localStorage.setItem('reviewAuthor', '');
+              rerender();
+            },
+          },
+          '✕',
+        )
+      : null,
+    h('div', { style: 'flex:1' }),
+    draftToggle,
+  );
 }
 
 // CI still running: a small spinning ring instead of a static dot.
@@ -337,6 +406,7 @@ function renderListHead() {
       ),
     );
   }
+  renderListFilters();
   const pf = $('#prFilters');
   pf.hidden = state.view !== 'prs';
   if (state.view === 'prs') {
@@ -506,7 +576,10 @@ function renderList() {
       });
     };
     const section = (label, prs) => {
-      const searched = prs.filter((p) => matches([p.title, p.repo, p.number, p.branch, p.author].join(' ')));
+      const searched = prs
+        .filter((p) => matches([p.title, p.repo, p.number, p.branch, p.author].join(' ')))
+        .filter((p) => !(state.hideDrafts[state.view] && p.draft))
+        .filter((p) => state.view !== 'reviews' || !state.reviewAuthor || p.author === state.reviewAuthor);
       const f = activePRFilter();
       const keep = (p) => f === 'all' || (f === 'ready' ? p.mergeReady : p.needsResponse);
       // Readiness is stack-aware (mergeReady), so a ready stack shows whole; "needs response" shows

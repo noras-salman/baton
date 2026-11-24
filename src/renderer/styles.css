@@ -336,3 +336,9 @@ h3.md-h { font-size: 15px; }
 .msg .md { white-space: normal; }
 .cbody .md, .msg .md { color: #c9cdd8; }
 .cbody { white-space: normal; }
+
+/* list filters (drafts / author) */
+.list-filters { gap: 8px; font-size: 12px; }
+.list-filters[hidden] { display: none; }
+.list-filters .author-select { margin-left: 0; max-width: 220px; font-size: 12px; padding: 3px 6px; }
+.list-filters .toggle { gap: 6px; color: var(--muted); white-space: nowrap; }
