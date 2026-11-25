@@ -87,3 +87,7 @@ The agent writes a handoff summary (state, next steps, key files and decisions) 
 node bin/baton.js add --title "..." [--session <id>]... [--pr <url>]... [--context "..."] [--priority high]
 node bin/baton.js list
 ```
+
+## License
+
+[MIT](LICENSE) © 2026 Noräs Salman. Baton is an independent project, not affiliated with or endorsed by Anthropic.
