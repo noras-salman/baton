@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9" xmlns:image="http://www.google.com/schemas/sitemap-image/1.1">
+  <url>
+    <loc>https://noras-salman.github.io/baton/</loc>
+    <lastmod>2026-11-24</lastmod>
+    <image:image><image:loc>https://noras-salman.github.io/baton/assets/screens/tasks.png</image:loc></image:image>
+    <image:image><image:loc>https://noras-salman.github.io/baton/assets/screens/pull-requests.png</image:loc></image:image>
+    <image:image><image:loc>https://noras-salman.github.io/baton/assets/screens/notifications.png</image:loc></image:image>
+  </url>
+</urlset>

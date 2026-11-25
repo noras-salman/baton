@@ -1,6 +1,6 @@
 # Baton
 
-A desktop task tracker where each task can be linked to a Claude Code session, so you can park pending work and resume that exact session later.
+Baton is a free, open-source desktop app for [Claude Code](https://docs.anthropic.com/en/docs/claude-code) users. Park unfinished sessions as tasks with the agent’s handoff notes, track your GitHub pull requests and stacked PRs, and get notified when Claude needs an answer or finishes. Runs on macOS, Windows and Linux.
 
 **Website:** https://noras-salman.github.io/baton/ (served from `docs/`)
 

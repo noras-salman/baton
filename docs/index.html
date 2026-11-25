@@ -3,14 +3,24 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Baton: keep track of what Claude Code left unfinished</title>
-    <meta
-      name="description"
-      content="Baton is a desktop app for Claude Code users. Park unfinished work as tasks with handoff notes, track your pull requests and stacks, and get notified when Claude needs you."
-    />
-    <meta property="og:title" content="Baton for Claude Code" />
-    <meta property="og:description" content="Park what Claude left unfinished. Pick it up exactly where it stopped." />
-    <meta property="og:image" content="assets/screens/tasks.png" />
+    <title>Baton: tasks, pull requests and alerts for Claude Code</title>
+    <meta name="description" content="Free desktop app for Claude Code: turn unfinished sessions into tasks with handoff notes, track GitHub PRs and stacks, and get alerts when Claude needs you." />
+    <link rel="canonical" href="https://noras-salman.github.io/baton/" />
+    <meta name="robots" content="index, follow" />
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Baton" />
+    <meta property="og:url" content="https://noras-salman.github.io/baton/" />
+    <meta property="og:title" content="Baton: tasks, pull requests and alerts for Claude Code" />
+    <meta property="og:description" content="Park what Claude left unfinished and pick it up exactly where it stopped. Free and open source for macOS, Windows and Linux." />
+    <meta property="og:image" content="https://noras-salman.github.io/baton/assets/social.png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="Baton’s pull request view with a stack of three PRs, next to the headline Tasks, PRs and alerts for Claude Code" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Baton: tasks, pull requests and alerts for Claude Code" />
+    <meta name="twitter:description" content="Park what Claude left unfinished and pick it up exactly where it stopped." />
+    <meta name="twitter:image" content="https://noras-salman.github.io/baton/assets/social.png" />
+    <link rel="apple-touch-icon" href="assets/apple-touch-icon.png" />
     <meta name="theme-color" content="#141826" />
     <link rel="icon" type="image/png" href="assets/favicon.png" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -20,6 +30,95 @@
       rel="stylesheet"
     />
     <link rel="stylesheet" href="style.css" />
+    <script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "SoftwareApplication",
+  "name": "Baton",
+  "description": "Free desktop app for Claude Code: turn unfinished sessions into tasks with handoff notes, track GitHub PRs and stacks, and get alerts when Claude needs you.",
+  "url": "https://noras-salman.github.io/baton/",
+  "applicationCategory": "DeveloperApplication",
+  "applicationSubCategory": "Task tracker",
+  "operatingSystem": "macOS, Windows, Linux",
+  "softwareVersion": "0.8.0",
+  "offers": {
+    "@type": "Offer",
+    "price": "0",
+    "priceCurrency": "USD"
+  },
+  "downloadUrl": "https://github.com/noras-salman/baton/releases/latest",
+  "license": "https://github.com/noras-salman/baton/blob/main/LICENSE",
+  "image": "https://noras-salman.github.io/baton/assets/icon.png",
+  "screenshot": [
+    "https://noras-salman.github.io/baton/assets/screens/tasks.png",
+    "https://noras-salman.github.io/baton/assets/screens/pull-requests.png",
+    "https://noras-salman.github.io/baton/assets/screens/notifications.png"
+  ],
+  "author": {
+    "@type": "Person",
+    "name": "Noräs Salman",
+    "url": "https://github.com/noras-salman"
+  },
+  "codeRepository": "https://github.com/noras-salman/baton",
+  "keywords": "Claude Code, task tracker, GitHub pull requests, stacked PRs, notifications, developer tools, desktop app"
+}
+    </script>
+    <script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "FAQPage",
+  "mainEntity": [
+    {
+      "@type": "Question",
+      "name": "Does Baton send my code or conversations anywhere?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "No. It reads Claude Code’s session files on your computer (~/.claude) and stores tasks in ~/.baton. Pull request data comes from GitHub through your own gh login. There’s no Baton server or account."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Do I need to log in to anything?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "No. Baton uses the Claude Code and GitHub CLI logins already on your machine. Opening a session runs claude exactly as you would."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Does it work with the Claude Code extension for VS Code?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Yes. Sessions from VS Code show up like any other, and Baton can open a session or start a new one in the VS Code Claude panel. Terminal and iTerm work too."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "What does installing /task and the hooks change?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "/task is a Claude Code skill added to ~/.claude/skills/task. The optional hooks are added to ~/.claude/settings.json; your other settings are kept, a backup is saved next to the file, and you can remove them from Settings."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Why does macOS say it can’t check Baton for malicious software?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Baton isn’t notarized by Apple yet. Right-click the app in Applications, choose Open, and confirm once. After that it opens normally."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "How well does it work on Windows and Linux?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Tasks, sessions, pull requests and notifications work the same everywhere. Opening sessions uses Windows Terminal or PowerShell on Windows and your terminal emulator on Linux. These builds are new, so they’re marked beta; please report anything that doesn’t work."
+      }
+    }
+  ]
+}
+    </script>
   </head>
   <body>
     <a class="skip" href="#features">Skip to features</a>
