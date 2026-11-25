@@ -220,6 +220,24 @@ h1 {
 .works-with p { max-width: 1240px; margin: 0 auto; color: var(--muted); font-size: 16px; }
 .works-with strong { color: var(--ink); font-weight: 600; }
 
+/* ---- video ------------------------------------------------------------------------- */
+.video {
+  max-width: 1240px;
+  margin: clamp(20px, 3vw, 32px) auto 0;
+}
+.video video {
+  display: block;
+  width: 100%;
+  height: auto;
+  aspect-ratio: 16 / 9;
+  border-radius: 14px;
+  background: var(--night);
+  box-shadow:
+    0 0 0 1px rgba(23, 26, 34, 0.18),
+    0 30px 60px -30px rgba(10, 14, 30, 0.55),
+    0 18px 36px -18px rgba(10, 14, 30, 0.35);
+}
+
 /* ---- features ---------------------------------------------------------------------- */
 .section-title {
   max-width: 1240px;
@@ -228,7 +246,7 @@ h1 {
   letter-spacing: -0.016em;
   text-wrap: balance;
 }
-.features, .how, .download, .faq { padding: clamp(64px, 9vw, 120px) var(--pad) 0; }
+.watch, .features, .how, .download, .faq { padding: clamp(64px, 9vw, 120px) var(--pad) 0; }
 .feature {
   max-width: 1240px;
   margin: clamp(40px, 6vw, 80px) auto 0;
