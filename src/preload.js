@@ -3,6 +3,7 @@ const { contextBridge, ipcRenderer } = require('electron');
 const invoke = (ch) => (arg) => ipcRenderer.invoke(ch, arg);
 
 contextBridge.exposeInMainWorld('api', {
+  platform: process.platform,
   listTasks: invoke('tasks:list'),
   saveTask: invoke('tasks:save'),
   deleteTask: invoke('tasks:delete'),

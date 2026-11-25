@@ -2,6 +2,12 @@
 
 A desktop task tracker where each task can be linked to a Claude Code session, so you can park pending work and resume that exact session later.
 
+**Website:** https://noras-salman.github.io/baton/ (served from `docs/`)
+
+## Download
+
+Get the latest build for macOS (Apple silicon or Intel), Windows or Linux from [Releases](https://github.com/noras-salman/baton/releases/latest). Windows and Linux builds are beta.
+
 ## Install
 
 ```bash
@@ -10,6 +16,27 @@ npm run dist        # builds dist/Baton-<version>-arm64.dmg
 ```
 
 Open the DMG and drag Baton to Applications. The build is ad-hoc signed and not notarized, so it's meant for your own Mac. The first time you open a copy downloaded from elsewhere, right-click the app and choose Open.
+
+## Releasing
+
+Push a version tag and GitHub Actions builds every platform and publishes the release:
+
+```bash
+npm version minor        # bumps package.json and tags vX.Y.Z
+git push --follow-tags
+```
+
+Download file names don't change between versions, so the site's "latest" links keep working.
+
+## Website and screenshots
+
+The landing page lives in `docs/` (GitHub Pages: Settings → Pages → Deploy from branch → `main` / `docs`). Screenshots are taken from made-up demo data, never from a real account:
+
+```bash
+node scripts/demo/make-demo.js /tmp/baton-demo
+BATON_HOME=/tmp/baton-demo/baton CLAUDE_CONFIG_DIR=/tmp/baton-demo/claude BATON_OFFLINE=1 \
+  npx electron scripts/demo/screenshots.js docs/assets/screens
+```
 
 ## Develop
 

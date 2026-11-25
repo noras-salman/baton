@@ -31,13 +31,17 @@ for (const k of Object.keys(process.env)) {
 // commands we type there unset them too.
 const CLEAN_ENV = `unset ${INHERITED_MARKERS.join(' ')} 2>/dev/null;`;
 
+const IS_MAC = process.platform === 'darwin';
+const IS_WIN = process.platform === 'win32';
+
 function createWindow() {
   win = new BrowserWindow({
     width: 1280,
     height: 820,
     minWidth: 900,
     minHeight: 560,
-    titleBarStyle: 'hiddenInset',
+    ...(IS_MAC ? { titleBarStyle: 'hiddenInset' } : { autoHideMenuBar: true }),
+    icon: IS_MAC ? undefined : path.join(__dirname, '..', 'build', 'icon.png'),
     backgroundColor: '#0f1115',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
@@ -54,9 +58,13 @@ function createWindow() {
 const shq = (s) => `'${String(s).replace(/'/g, `'\\''`)}'`;
 const asq = (s) => `"${String(s).replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
 
+const psq = (s) => `'${String(s).replace(/'/g, "''")}'`; // PowerShell single-quoted string
+
+// The command shown for copying (how you'd type it yourself on this platform).
 function resumeCommand(sessionId, cwd) {
   if (!/^[0-9a-f-]{36}$/i.test(sessionId)) throw new Error('Invalid session id');
-  return `cd ${shq(cwd || require('os').homedir())} && claude --resume ${sessionId}`;
+  const dir = cwd || require('os').homedir();
+  return IS_WIN ? `Set-Location -LiteralPath ${psq(dir)}; claude --resume ${sessionId}` : `cd ${shq(dir)} && claude --resume ${sessionId}`;
 }
 
 function osascript(script) {
@@ -65,28 +73,78 @@ function osascript(script) {
   });
 }
 
-// Open the project folder in VS Code, then hand the Claude Code extension a link
-// (vscode://anthropic.claude-code/open?session=…|prompt=…) which it opens in its panel.
-function openInVSCode(folder, link) {
-  const run = (args) => new Promise((resolve, reject) => execFile('open', args, (err) => (err ? reject(err) : resolve())));
-  return run(['-a', 'Visual Studio Code', folder])
-    .then(() => new Promise((r) => setTimeout(r, 1500))) // let the window for that folder come forward
-    .then(() => run([link]));
+const run = (cmd, args, opts = {}) =>
+  new Promise((resolve, reject) => execFile(cmd, args, opts, (err) => (err ? reject(err) : resolve())));
+
+function detached(cmd, args, opts = {}) {
+  return new Promise((resolve, reject) => {
+    const { spawn } = require('child_process');
+    const child = spawn(cmd, args, { detached: true, stdio: 'ignore', ...opts });
+    child.once('error', reject);
+    child.once('spawn', () => {
+      child.unref();
+      resolve();
+    });
+  });
 }
 
-async function openInTerminal(cmd, terminal) {
-  if (!cmd.startsWith(CLEAN_ENV)) cmd = `${CLEAN_ENV} ${cmd}`;
-  if (terminal === 'iterm') {
-    await osascript(`tell application "iTerm"
+// Open a folder in VS Code (macOS: the app; elsewhere: the `code` command).
+async function openFolderInVSCode(folder) {
+  if (IS_MAC) return run('open', ['-a', 'Visual Studio Code', folder]);
+  return detached(IS_WIN ? 'code.cmd' : 'code', [folder], { shell: IS_WIN });
+}
+
+// Open the project folder in VS Code, then hand the Claude Code extension a link
+// (vscode://anthropic.claude-code/open?session=…|prompt=…) which it opens in its panel.
+async function openInVSCode(folder, link) {
+  await openFolderInVSCode(folder);
+  await new Promise((r) => setTimeout(r, 1500)); // let the window for that folder come forward
+  await shell.openExternal(link);
+}
+
+// Run `claude <args> [prompt from file]` in a new terminal window in `cwd`.
+// spec: { cwd, args: string[], promptFile?: string }
+async function openInTerminal(spec, terminal) {
+  const { cwd, args = [], promptFile } = spec;
+  if (IS_MAC || !IS_WIN) {
+    const posix = `${CLEAN_ENV} cd ${shq(cwd)} && claude ${args.map(shq).join(' ')}${promptFile ? ` "$(cat ${shq(promptFile)})"` : ''}`;
+    if (IS_MAC) {
+      if (terminal === 'iterm') {
+        return osascript(`tell application "iTerm"
   activate
   set w to (create window with default profile)
-  tell current session of w to write text ${asq(cmd)}
+  tell current session of w to write text ${asq(posix)}
 end tell`);
-  } else {
-    await osascript(`tell application "Terminal"
+      }
+      return osascript(`tell application "Terminal"
   activate
-  do script ${asq(cmd)}
+  do script ${asq(posix)}
 end tell`);
+    }
+    // Linux: first terminal emulator that exists; keep the shell open afterwards.
+    const line = `${posix}; exec "\${SHELL:-bash}"`;
+    const candidates = [
+      ['x-terminal-emulator', ['-e', 'bash', '-lc', line]],
+      ['gnome-terminal', ['--', 'bash', '-lc', line]],
+      ['konsole', ['-e', 'bash', '-lc', line]],
+      ['xfce4-terminal', ['-x', 'bash', '-lc', line]],
+      ['xterm', ['-e', 'bash', '-lc', line]],
+    ];
+    for (const [cmd, a] of candidates) {
+      try {
+        return await detached(cmd, a);
+      } catch {
+        /* try the next one */
+      }
+    }
+    throw new Error('No terminal emulator found (tried x-terminal-emulator, gnome-terminal, konsole, xfce4-terminal, xterm)');
+  }
+  // Windows: Windows Terminal if present, else a plain PowerShell window.
+  const ps = `Set-Location -LiteralPath ${psq(cwd)}; claude ${args.map(psq).join(' ')}${promptFile ? ` (Get-Content -Raw -LiteralPath ${psq(promptFile)})` : ''}`;
+  try {
+    await detached('wt.exe', ['-d', cwd, 'powershell', '-NoExit', '-Command', ps]);
+  } catch {
+    await detached('cmd.exe', ['/c', 'start', '""', 'powershell', '-NoExit', '-Command', ps], { windowsVerbatimArguments: false });
   }
 }
 
@@ -118,7 +176,8 @@ ipcMain.handle('session:resume', async (_e, { sessionId, cwd, terminal }) => {
     });
     if (response !== 0) return { ok: false, cancelled: true };
   }
-  await openInTerminal(resumeCommand(sessionId, cwd), terminal);
+  if (!/^[0-9a-f-]{36}$/i.test(sessionId)) throw new Error('Invalid session id');
+  await openInTerminal({ cwd: cwd || require('os').homedir(), args: ['--resume', sessionId] }, terminal);
   return { ok: true };
 });
 // Start a brand-new Claude Code session for a task. The session id is chosen here so the
@@ -132,16 +191,15 @@ ipcMain.handle('session:start', async (_e, { cwd, prompt, name, mode, terminal }
   fs.mkdirSync(dir, { recursive: true });
   const file = path.join(dir, `${sessionId}.md`);
   fs.writeFileSync(file, prompt);
-  const flags = [`--session-id ${sessionId}`];
-  if (name) flags.push(`--name ${shq(String(name).slice(0, 80))}`);
-  if (START_MODES.has(mode) && mode !== 'default') flags.push(`--permission-mode ${mode}`);
+  const flags = ['--session-id', sessionId];
+  if (name) flags.push('--name', String(name).slice(0, 80));
+  if (START_MODES.has(mode) && mode !== 'default') flags.push('--permission-mode', mode);
   if (terminal === 'vscode') {
     // VS Code picks its own session id; the renderer links the session once it appears.
     await openInVSCode(cwd, `vscode://anthropic.claude-code/open?prompt=${encodeURIComponent(prompt)}`);
     return { sessionId: null, cwd, pending: true, startedAt: new Date().toISOString() };
   }
-  const cmd = `${CLEAN_ENV} cd ${shq(cwd)} && claude ${flags.join(' ')} "$(cat ${shq(file)})"`;
-  await openInTerminal(cmd, terminal);
+  await openInTerminal({ cwd, args: flags, promptFile: file }, terminal);
   return { sessionId, cwd };
 });
 
@@ -153,9 +211,7 @@ ipcMain.handle('dialog:pickFolder', async (_e, defaultPath) => {
 ipcMain.handle('session:command', (_e, { sessionId, cwd }) => resumeCommand(sessionId, cwd));
 ipcMain.handle('clipboard:write', (_e, text) => clipboard.writeText(String(text)));
 ipcMain.handle('open:folder', (_e, dir) => shell.openPath(dir));
-ipcMain.handle('open:vscode', (_e, dir) =>
-  new Promise((resolve) => execFile('open', ['-a', 'Visual Studio Code', dir], (err) => resolve(!err))),
-);
+ipcMain.handle('open:vscode', (_e, dir) => openFolderInVSCode(dir).then(() => true, () => false));
 ipcMain.handle('open:url', (_e, url) => {
   if (/^https:\/\//.test(url)) shell.openExternal(url);
 });
@@ -199,6 +255,7 @@ function send(channel, payload) {
 function updateBadge() {
   const n = prefs().dockBadge ? notifications.unreadCount() : 0;
   if (app.dock) app.dock.setBadge(n ? String(n > 99 ? '99+' : n) : '');
+  else app.setBadgeCount(n); // Linux (Unity launchers); no-op where unsupported
 }
 
 // macOS only shows Dock badges and banners for apps that have asked for notification
@@ -343,7 +400,11 @@ function drainInbox() {
   if (notes.length) deliver(notes);
 }
 
+// BATON_OFFLINE=1: never call GitHub; serve cached/demo data (used for screenshots and demos).
+const OFFLINE = process.env.BATON_OFFLINE === '1';
+
 async function pollPRs() {
+  if (OFFLINE) return send('prs:updated', { data: prData, error: '' });
   if (prInflight) return prInflight;
   prInflight = (async () => {
     try {
@@ -367,6 +428,10 @@ async function pollPRs() {
 
 ipcMain.handle('github:cached', () => prData);
 ipcMain.handle('github:conversation', async (_e, url) => {
+  if (OFFLINE) {
+    const demo = readJSON(path.join(store.DATA_DIR, 'demo-conversations.json'), {})[url];
+    return demo ? { ok: true, data: { ...demo, fetchedAt: new Date().toISOString() } } : { ok: false, error: 'offline' };
+  }
   try {
     return { ok: true, data: await github.fetchPRConversation(url) };
   } catch (e) {
@@ -383,7 +448,10 @@ const claudeJobs = new Map(); // sessionId -> { startedAt, message }
 
 function claudeBin() {
   const home = require('os').homedir();
-  for (const p of [path.join(home, '.local/bin/claude'), '/opt/homebrew/bin/claude', '/usr/local/bin/claude', path.join(home, '.claude/local/claude')]) {
+  const candidates = IS_WIN
+    ? [path.join(home, '.local', 'bin', 'claude.exe'), path.join(process.env.LOCALAPPDATA || '', 'Programs', 'claude', 'claude.exe')]
+    : [path.join(home, '.local/bin/claude'), '/opt/homebrew/bin/claude', '/usr/local/bin/claude', '/usr/bin/claude', path.join(home, '.claude/local/claude')];
+  for (const p of candidates) {
     if (fs.existsSync(p)) return p;
   }
   return 'claude';
@@ -506,7 +574,8 @@ ipcMain.handle('settings:get', () => ({
   // Repos you can mute: everything currently in your PR lists plus anything already muted.
   repos: [...new Set([...(prData ? [...prData.mine, ...prData.review].map((p) => p.repo) : []), ...prefs().mutedRepos])].sort(),
   openAtLogin: app.isPackaged ? app.getLoginItemSettings().openAtLogin : false,
-  canLaunchAtLogin: app.isPackaged,
+  canLaunchAtLogin: app.isPackaged && process.platform !== 'linux', // Electron has no login items on Linux
+  platform: process.platform,
 }));
 ipcMain.handle('settings:set', (_e, patch) => {
   const { openAtLogin, notify, ...rest } = patch || {};

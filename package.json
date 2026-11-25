@@ -1,6 +1,6 @@
 {
   "name": "baton",
-  "version": "0.7.2",
+  "version": "0.8.0",
   "description": "Park pending work from Claude Code sessions as tasks, linked to sessions and GitHub PRs.",
   "main": "src/main.js",
   "bin": {
@@ -9,7 +9,7 @@
   "scripts": {
     "start": "env -u ELECTRON_RUN_AS_NODE electron .",
     "install-skill": "node bin/baton.js install-skill",
-    "dist": "electron-builder --mac dmg",
+    "dist": "electron-builder --mac dmg --arm64",
     "postdist": "rm -rf dist/mac-arm64"
   },
   "license": "UNLICENSED",
@@ -31,6 +31,7 @@
       "lib/**",
       "bin/**",
       "skill/**",
+      "build/icon.png",
       "package.json"
     ],
     "asarUnpack": [
@@ -44,12 +45,14 @@
         {
           "target": "dmg",
           "arch": [
-            "arm64"
+            "arm64",
+            "x64"
           ]
         }
       ],
       "icon": "build/icon.png",
-      "hardenedRuntime": false
+      "hardenedRuntime": false,
+      "artifactName": "Baton-mac-${arch}.${ext}"
     },
     "dmg": {
       "title": "Baton"
@@ -58,7 +61,54 @@
       "runAsNode": false,
       "enableNodeCliInspectArguments": false,
       "enableNodeOptionsEnvironmentVariable": false
+    },
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "build/icon.png",
+      "artifactName": "Baton-windows-${arch}-setup.${ext}"
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "shortcutName": "Baton"
+    },
+    "linux": {
+      "target": [
+        {
+          "target": "AppImage",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "deb",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "build/icon.png",
+      "category": "Development",
+      "executableName": "baton",
+      "maintainer": "Baton <noras-salman@users.noreply.github.com>",
+      "synopsis": "Tasks, PRs and Claude Code sessions in one place",
+      "artifactName": "Baton-linux-${arch}.${ext}"
     }
   },
-  "author": "Baton"
+  "author": {
+    "name": "Baton",
+    "email": "noras-salman@users.noreply.github.com"
+  },
+  "homepage": "https://noras-salman.github.io/baton/",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/noras-salman/baton.git"
+  }
 }

@@ -774,11 +774,17 @@ const emptyDetail = (msg) => h('div', { class: 'detail-empty' }, h('div', {}, ms
 // ---- shared detail pieces --------------------------------------------------
 // Where Claude sessions open: the VS Code extension panel, Terminal, or iTerm.
 const terminal = () => localStorage.getItem('terminal') || 'vscode';
-const OPEN_IN = [
-  ['vscode', 'VS Code'],
-  ['terminal', 'Terminal'],
-  ['iterm', 'iTerm'],
-];
+const OPEN_IN =
+  api.platform === 'darwin'
+    ? [
+        ['vscode', 'VS Code'],
+        ['terminal', 'Terminal'],
+        ['iterm', 'iTerm'],
+      ]
+    : [
+        ['vscode', 'VS Code'],
+        ['terminal', api.platform === 'win32' ? 'Windows Terminal' : 'Terminal'],
+      ];
 const openInLabel = (v = terminal()) => (OPEN_IN.find(([k]) => k === v) || OPEN_IN[0])[1];
 
 async function resume(sessionId, cwd) {

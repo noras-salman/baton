@@ -1,0 +1,318 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Baton: keep track of what Claude Code left unfinished</title>
+    <meta
+      name="description"
+      content="Baton is a desktop app for Claude Code users. Park unfinished work as tasks with handoff notes, track your pull requests and stacks, and get notified when Claude needs you."
+    />
+    <meta property="og:title" content="Baton for Claude Code" />
+    <meta property="og:description" content="Park what Claude left unfinished. Pick it up exactly where it stopped." />
+    <meta property="og:image" content="assets/screens/tasks.png" />
+    <meta name="theme-color" content="#141826" />
+    <link rel="icon" type="image/png" href="assets/favicon.png" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500..800&family=Instrument+Sans:wght@400..600&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <a class="skip" href="#features">Skip to features</a>
+
+    <header class="hero">
+      <nav class="nav" aria-label="Main">
+        <a class="brand" href="./"><img src="assets/icon.png" alt="" width="34" height="34" />Baton</a>
+        <div class="nav-links">
+          <a href="#features">Features</a>
+          <a href="#how">How it works</a>
+          <a href="#download">Download</a>
+          <a href="https://github.com/noras-salman/baton">GitHub</a>
+        </div>
+      </nav>
+
+      <div class="hero-grid">
+        <div class="hero-copy">
+          <h1>Park what Claude left unfinished. Pick it up exactly where it stopped.</h1>
+          <p class="lede">
+            Baton is a desktop app for people who work with Claude Code. It turns pending work into tasks with the agent’s own handoff
+            notes, keeps your pull requests and stacks in view, and tells you the moment Claude needs an answer.
+          </p>
+          <div class="cta">
+            <a class="btn-primary" id="primary-download" href="#download">
+              <span class="btn-label">Download Baton</span>
+              <span class="btn-sub" id="primary-sub">Free for macOS, Windows and Linux</span>
+            </a>
+            <a class="btn-quiet" href="#download">All downloads</a>
+          </div>
+          <p class="fine">Uses the Claude Code and GitHub CLI logins you already have. Nothing to sign up for.</p>
+        </div>
+
+        <!-- The one animated moment: work moving from a session, to a task, to a merged PR. -->
+        <figure class="relay" aria-label="A Claude session hands off to a task, which ends in a pull request ready to merge">
+          <div class="lane lane-1">
+            <span class="lane-name">Claude session</span>
+            <span class="token">◆ Checkout v2 · 3 things left</span>
+          </div>
+          <div class="lane lane-2">
+            <span class="lane-name">Task</span>
+            <span class="token">Ship Checkout v2 · handoff attached</span>
+          </div>
+          <div class="lane lane-3">
+            <span class="lane-name">Pull request</span>
+            <span class="token token-ready">✓ #142 ready to merge</span>
+          </div>
+          <img class="baton" src="assets/icon.png" alt="" width="64" height="64" />
+        </figure>
+      </div>
+
+      <div class="hero-shot">
+        <button class="shot" data-zoom aria-label="Enlarge screenshot of a task with its handoff, session and pull requests">
+          <img src="assets/screens/tasks.png" width="1440" height="900" alt="Baton showing the task ‘Ship Checkout v2’ with the agent’s handoff notes, the running Claude session and three stacked pull requests" />
+        </button>
+      </div>
+    </header>
+
+    <section class="works-with" aria-label="Works with">
+      <p>Works with <strong>Claude Code</strong> in the terminal and in VS Code, the <strong>GitHub CLI</strong>, and runs on <strong>macOS</strong>, <strong>Windows</strong> and <strong>Linux</strong>.</p>
+    </section>
+
+    <main>
+      <section id="features" class="features">
+        <h2 class="section-title">Everything between “Claude, do this” and “merged”</h2>
+
+        <article class="feature">
+          <div class="feature-text">
+            <h3>Park work with a real handoff</h3>
+            <p>
+              Type <code>/task</code> in any Claude Code session. Claude writes down where things stand, what’s next, which files and
+              branches matter, and what’s still open, and files it in Baton linked to that session.
+            </p>
+            <ul>
+              <li>Link a task to several sessions and pull requests</li>
+              <li>Open the session again in VS Code or your terminal with one click</li>
+              <li>The conversation is saved with the task, even if the session is deleted</li>
+            </ul>
+          </div>
+          <button class="shot" data-zoom aria-label="Enlarge screenshot of a task">
+            <img loading="lazy" src="assets/screens/session.png" width="1440" height="900" alt="A Claude session in Baton with a box for sending Claude a message and the recent conversation" />
+          </button>
+        </article>
+
+        <article class="feature flip">
+          <div class="feature-text">
+            <h3>Your pull requests, stacks included</h3>
+            <p>
+              Baton reads your open pull requests and the ones waiting on your review through the GitHub CLI. Stacked PRs are grouped
+              bottom to top, and a stack only counts as ready when every PR in it is.
+            </p>
+            <ul>
+              <li><span class="dot dot-green"></span>Ready to merge and <span class="dot dot-red"></span>to address counters</li>
+              <li>Checks, approvals, conflicts and open threads on every PR</li>
+              <li>Filter review requests by author and hide drafts</li>
+            </ul>
+          </div>
+          <button class="shot" data-zoom aria-label="Enlarge screenshot of pull requests">
+            <img loading="lazy" src="assets/screens/pull-requests.png" width="1440" height="900" alt="The pull request list with a three-PR stack, checks running, one PR with changes requested and one ready to merge" />
+          </button>
+        </article>
+
+        <article class="feature">
+          <div class="feature-text">
+            <h3>Know the moment Claude needs you</h3>
+            <p>
+              Get a notification when Claude asks a question, waits for permission, has a plan for you to approve, or finishes a long
+              run. The same inbox collects new comments, review requests, failing checks and PRs that just became ready.
+            </p>
+            <ul>
+              <li>Unread count on the app icon</li>
+              <li>Choose exactly which events notify you, and mute repos or PRs</li>
+              <li>Answer from Baton, or jump straight to the session</li>
+            </ul>
+          </div>
+          <button class="shot" data-zoom aria-label="Enlarge screenshot of notifications">
+            <img loading="lazy" src="assets/screens/notifications.png" width="1440" height="900" alt="Notifications in Baton: Claude has a question about refunds, a reviewer requested changes, a PR is ready to merge" />
+          </button>
+        </article>
+
+        <article class="feature flip">
+          <div class="feature-text">
+            <h3>Read the whole review without the browser</h3>
+            <p>
+              Each pull request shows its description, review threads with file and line, reviews and comments, rendered the way
+              GitHub renders them. Filter to what’s still unresolved.
+            </p>
+          </div>
+          <button class="shot" data-zoom aria-label="Enlarge screenshot of a PR conversation">
+            <img loading="lazy" src="assets/screens/conversation.png" width="1440" height="900" alt="A pull request conversation with an unresolved review thread, a bot review table and a reply containing code" />
+          </button>
+        </article>
+
+        <article class="feature">
+          <div class="feature-text">
+            <h3>Let Claude take the first pass</h3>
+            <p>
+              Describe what needs doing and start a new Claude Code session straight from the task. Baton writes the prompt from your
+              notes, the handoff, and the linked PRs, and links the new session back to the task.
+            </p>
+            <ul>
+              <li>Plan first, ask before changes, or auto-accept edits</li>
+              <li>Opens in VS Code, Terminal or iTerm</li>
+              <li>A default project folder per task</li>
+            </ul>
+          </div>
+          <button class="shot" data-zoom aria-label="Enlarge screenshot of starting Claude on a task">
+            <img loading="lazy" src="assets/screens/start-claude.png" width="1440" height="900" alt="The Start with Claude dialog with a project folder, a description of the work and a choice of mode" />
+          </button>
+        </article>
+
+        <article class="feature flip">
+          <div class="feature-text">
+            <h3>Approve and merge when it’s green</h3>
+            <p>
+              See what’s still blocking a PR, pick the merge method your repo allows, or turn on auto-merge. Baton merges exactly the
+              commit you looked at, and won’t merge the middle of a stack.
+            </p>
+          </div>
+          <button class="shot" data-zoom aria-label="Enlarge screenshot of merging a PR">
+            <img loading="lazy" src="assets/screens/merge.png" width="1440" height="900" alt="The merge dialog showing every check passing, squash and merge selected, and the delete branch option" />
+          </button>
+        </article>
+
+        <div class="extras">
+          <div>
+            <h4>Message any session</h4>
+            <p>Send Claude a follow-up from Baton. Closed sessions continue in the background and the reply lands back in the session.</p>
+          </div>
+          <div>
+            <h4>Review requests in one tab</h4>
+            <p>Everything waiting on you, grouped by stack, with an approve button and the author of each PR.</p>
+          </div>
+          <div>
+            <h4>Stays on your machine</h4>
+            <p>Baton reads Claude Code’s files on your computer and talks to GitHub through your own <code>gh</code> login. It has no server.</p>
+          </div>
+          <div>
+            <h4>Fits the way you work</h4>
+            <p>Resizable panes, keyboard shortcuts, and settings for what you want to hear about.</p>
+          </div>
+        </div>
+      </section>
+
+      <section id="how" class="how">
+        <h2 class="section-title">Set up in a minute</h2>
+        <ol class="steps">
+          <li>
+            <h3>Install Baton</h3>
+            <p>It finds your Claude Code sessions and your GitHub login on its own. If <code>gh</code> isn’t signed in, run <code>gh auth login</code> once.</p>
+          </li>
+          <li>
+            <h3>Add <code>/task</code> to Claude Code</h3>
+            <p>One click in Settings. Optionally add the hooks that tell Baton when a session is waiting for you.</p>
+          </li>
+          <li>
+            <h3>Hand off, then pick it back up</h3>
+            <p>Run <code>/task</code> when you stop. Baton keeps the handoff, watches the PRs, and brings you back when something moves.</p>
+          </li>
+        </ol>
+      </section>
+
+      <section id="download" class="download">
+        <h2 class="section-title">Download</h2>
+        <p class="download-lede" id="detected">Pick the build for your computer.</p>
+        <ul class="platforms" id="platforms">
+          <li data-os="mac" data-arch="arm64">
+            <div><strong>macOS</strong><span>Apple silicon (M1 and later)</span></div>
+            <a class="dl" data-file="Baton-mac-arm64.dmg" href="#">Download .dmg</a>
+          </li>
+          <li data-os="mac" data-arch="x64">
+            <div><strong>macOS</strong><span>Intel</span></div>
+            <a class="dl" data-file="Baton-mac-x64.dmg" href="#">Download .dmg</a>
+          </li>
+          <li data-os="windows">
+            <div><strong>Windows</strong><span>10 and 11, 64-bit · beta</span></div>
+            <a class="dl" data-file="Baton-windows-x64-setup.exe" href="#">Download installer</a>
+          </li>
+          <li data-os="linux">
+            <div><strong>Linux</strong><span>AppImage, any distribution · beta</span></div>
+            <a class="dl" data-file="Baton-linux-x86_64.AppImage" href="#">Download AppImage</a>
+          </li>
+          <li data-os="linux">
+            <div><strong>Linux</strong><span>Debian and Ubuntu · beta</span></div>
+            <a class="dl" data-file="Baton-linux-amd64.deb" href="#">Download .deb</a>
+          </li>
+        </ul>
+        <div class="needs">
+          <p><strong>You’ll need</strong> Claude Code, and the GitHub CLI signed in (<code>gh auth login</code>) for the pull request features.</p>
+          <p>
+            <strong>First launch on macOS:</strong> builds aren’t notarized yet, so right-click Baton in Applications and choose Open.
+            <a id="all-releases" href="https://github.com/noras-salman/baton/releases">Release notes and older versions</a>
+          </p>
+        </div>
+      </section>
+
+      <section class="faq" aria-labelledby="faq-title">
+        <h2 class="section-title" id="faq-title">Questions</h2>
+        <details>
+          <summary>Does Baton send my code or conversations anywhere?</summary>
+          <p>
+            No. It reads Claude Code’s session files on your computer (<code>~/.claude</code>) and stores tasks in <code>~/.baton</code>.
+            Pull request data comes from GitHub through your own <code>gh</code> login. There’s no Baton server or account.
+          </p>
+        </details>
+        <details>
+          <summary>Do I need to log in to anything?</summary>
+          <p>No. Baton uses the Claude Code and GitHub CLI logins already on your machine. Opening a session runs <code>claude</code> exactly as you would.</p>
+        </details>
+        <details>
+          <summary>Does it work with the Claude Code extension for VS Code?</summary>
+          <p>
+            Yes. Sessions from VS Code show up like any other, and Baton can open a session or start a new one in the VS Code Claude
+            panel. Terminal and iTerm work too.
+          </p>
+        </details>
+        <details>
+          <summary>What does installing <code>/task</code> and the hooks change?</summary>
+          <p>
+            <code>/task</code> is a Claude Code skill added to <code>~/.claude/skills/task</code>. The optional hooks are added to
+            <code>~/.claude/settings.json</code>; your other settings are kept, a backup is saved next to the file, and you can remove them
+            from Settings.
+          </p>
+        </details>
+        <details>
+          <summary>Why does macOS say it can’t check Baton for malicious software?</summary>
+          <p>Baton isn’t notarized by Apple yet. Right-click the app in Applications, choose Open, and confirm once. After that it opens normally.</p>
+        </details>
+        <details>
+          <summary>How well does it work on Windows and Linux?</summary>
+          <p>
+            Tasks, sessions, pull requests and notifications work the same everywhere. Opening sessions uses Windows Terminal or
+            PowerShell on Windows and your terminal emulator on Linux. These builds are new, so they’re marked beta; please report
+            anything that doesn’t work.
+          </p>
+        </details>
+      </section>
+    </main>
+
+    <footer class="footer">
+      <div class="footer-brand"><img src="assets/icon.png" alt="" width="28" height="28" /> Baton</div>
+      <p>An independent project, not affiliated with or endorsed by Anthropic. Claude and Claude Code are trademarks of Anthropic.</p>
+      <nav aria-label="Footer">
+        <a href="https://github.com/noras-salman/baton">Source</a>
+        <a href="https://github.com/noras-salman/baton/releases">Releases</a>
+        <a href="https://github.com/noras-salman/baton/issues">Report a problem</a>
+      </nav>
+    </footer>
+
+    <dialog class="zoom" id="zoom" aria-label="Screenshot">
+      <button class="zoom-close" aria-label="Close">×</button>
+      <img alt="" />
+    </dialog>
+
+    <script src="main.js"></script>
+  </body>
+</html>
