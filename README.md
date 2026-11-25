@@ -4,6 +4,10 @@ A desktop task tracker where each task can be linked to a Claude Code session, s
 
 **Website:** https://noras-salman.github.io/baton/ (served from `docs/`)
 
+![Baton showing a task with Claude's handoff notes, its running Claude Code session, and a stack of three linked pull requests](docs/assets/screens/tasks.png)
+
+<sub>Screenshot uses made-up demo data.</sub>
+
 ## Download
 
 Get the latest build for macOS (Apple silicon or Intel), Windows or Linux from [Releases](https://github.com/noras-salman/baton/releases/latest). Windows and Linux builds are beta.
